@@ -387,11 +387,12 @@ class MambaSLAMPolicy(nn.Module):
         self.d_model = d_model
         self.max_seq_len = max_seq_len
         
-        # Observation encoder
+        # Observation encoder - handles variable input dimensions
         self.obs_encoder = nn.Sequential(
             nn.Linear(obs_dim, d_model),
             nn.ReLU(),
-            nn.Linear(d_model, d_model)
+            nn.Linear(d_model, d_model),
+            nn.LayerNorm(d_model)
         )
         
         # Mamba encoder for spatial reasoning

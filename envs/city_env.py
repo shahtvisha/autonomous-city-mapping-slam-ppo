@@ -77,7 +77,7 @@ class CityExplorerEnv(gym.Env):
         self.slam = OccupancyGrid(slam_cfg)
 
         P = 2*patch_r+1
-        self.meta_dim = 12
+        self.meta_dim = 13  # Fixed: actual number of meta features
         obs_dim = P*P + global_size*global_size + self.meta_dim
         self.observation_space = spaces.Box(-1.0, 1.0, shape=(obs_dim,), dtype=np.float32)
         self.action_space = spaces.Discrete(8)
