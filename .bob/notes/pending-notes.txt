@@ -12,3 +12,6 @@
 {"id":"652a8402-4d24-4501-b265-68d833a59d0a","ts":"2026-06-04T22:04:50.240Z","path":"/Users/tvishashah/Documents/active_slam_ppo/train_mamba_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
 {"id":"10d8e527-b2e0-479b-bf33-95bd10947e0e","ts":"2026-06-04T22:06:03.780Z","path":"/Users/tvishashah/Documents/active_slam_ppo/README_FAST_TRAINING.md","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
 {"id":"5f456d24-9f3e-4ce2-8aac-f7d52b4e05d4","ts":"2026-06-04T22:11:05.527Z","path":"/Users/tvishashah/Documents/active_slam_ppo/test_mamba_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
+{"id":"3da2383d-a908-4704-a4dd-5099b5ca4ac5","ts":"2026-06-04T22:19:20.367Z","path":"/Users/tvishashah/Documents/active_slam_ppo/evaluate_model.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
+{"id":"85e70e1b-2170-442c-bfdb-5780baad7464","ts":"2026-06-04T22:20:56.222Z","path":"/Users/tvishashah/Documents/active_slam_ppo/create_test_maps.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
+{"id":"16da3878-989f-4254-8427-e232c7ffcad6","ts":"2026-06-04T22:24:15.537Z","path":"/Users/tvishashah/Documents/active_slam_ppo/DEPLOYMENT_GUIDE.md","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
