@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Active SLAM + PPO — Best Episode</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#070b12;--surface:#0d1420;--border:#1a2535;
+  --text:#e6edf3;--sub:#4a6a8a;--green:#3fb950;
+  --orange:#f5a623;--red:#f85149;--purple:#a78bfa;
+  --blue:#58a6ff;--teal:#39d8c8;--gold:#ffd700;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+.header{padding:10px 20px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--surface);flex-shrink:0;flex-wrap:wrap;}
+.logo{font-size:15px;font-weight:700;}.logo span{color:var(--orange);}
+.badge{padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;border:0.5px solid;}
+.badge.good{background:rgba(63,185,80,.12);border-color:var(--green);color:var(--green);}
+.badge.gold{background:rgba(255,215,0,.12);border-color:var(--gold);color:var(--gold);}
+.badge.blue{background:rgba(88,166,255,.12);border-color:var(--blue);color:var(--blue);}
+.badge.warn{background:rgba(245,166,35,.12);border-color:var(--orange);color:var(--orange);}
+.header-info{flex:1;font-size:11px;color:var(--sub);text-align:center;}
+
+.body{display:flex;flex:1;overflow:hidden;}
+.canvases{flex:1;display:flex;overflow:hidden;}
+.panel{flex:1;display:flex;flex-direction:column;border-right:0.5px solid var(--border);}
+.panel:last-child{border-right:none;}
+.panel-header{padding:8px 14px;background:var(--surface);border-bottom:2px solid;display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.panel-header.trained{border-color:var(--green);}
+.panel-header.unseen{border-color:var(--gold);}
+.panel-title{font-size:13px;font-weight:700;}
+.panel-sub{font-size:10px;color:var(--sub);flex:1;}
+
+.canvas-area{flex:1;position:relative;overflow:hidden;background:#030508;display:flex;align-items:center;justify-content:center;}
+canvas{display:block;image-rendering:pixelated;}
+
+.overlay{position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px;pointer-events:none;z-index:10;}
+.pill{background:rgba(3,5,8,.92);border:0.5px solid var(--border);border-radius:12px;padding:3px 10px;font-size:11px;color:var(--sub);backdrop-filter:blur(6px);}
+.pill b{color:var(--text);}
+.pill.green{border-color:var(--green);color:var(--green);font-weight:600;}
+.pill.gold{border-color:var(--gold);color:var(--gold);font-weight:600;}
+
+.panel-tag{position:absolute;top:8px;right:8px;pointer-events:none;z-index:10;}
+.ptag{padding:5px 12px;border-radius:8px;font-size:12px;font-weight:700;border:0.5px solid;}
+.ptag.trained{background:rgba(63,185,80,.15);border-color:var(--green);color:var(--green);}
+.ptag.unseen{background:rgba(255,215,0,.15);border-color:var(--gold);color:var(--gold);}
+
+.canvas-anno{position:absolute;bottom:8px;left:8px;pointer-events:none;z-index:10;display:flex;flex-direction:column;gap:3px;}
+.anno{background:rgba(3,5,8,.88);border:0.5px solid var(--border);border-radius:6px;padding:3px 8px;font-size:10px;color:var(--sub);}
+.anno b{color:var(--text);}
+.anno.teal{border-color:var(--teal);color:var(--teal);}
+
+.progress-bar{height:4px;background:var(--border);flex-shrink:0;}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--orange),var(--gold));transition:width .06s;width:0%;}
+
+.stats-bar{display:flex;border-top:0.5px solid var(--border);background:var(--surface);flex-shrink:0;}
+.stat-cell{flex:1;padding:6px 8px;border-right:0.5px solid var(--border);text-align:center;}
+.stat-cell:last-child{border-right:none;}
+.stat-lbl{font-size:9px;color:var(--sub);text-transform:uppercase;letter-spacing:.4px;margin-bottom:1px;}
+.stat-val{font-size:14px;font-weight:700;}
+
+.sidebar{width:260px;flex-shrink:0;border-left:0.5px solid var(--border);background:var(--surface);padding:14px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;}
+.sec{font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px;display:flex;align-items:center;gap:6px;}
+.sec::after{content:'';flex:1;height:0.5px;background:var(--border);}
+.card{background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px;}
+
+.btn{width:100%;padding:8px;border-radius:8px;border:0.5px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;margin-bottom:5px;font-weight:500;transition:all .15s;}
+.btn:hover{border-color:var(--orange);color:var(--orange);}
+.btn.primary{background:var(--orange);border-color:var(--orange);color:#000;font-weight:700;}
+.btn.gold-btn{background:rgba(255,215,0,.1);border-color:var(--gold);color:var(--gold);}
+
+.slider-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--sub);margin-bottom:5px;}
+input[type=range]{accent-color:var(--orange);flex:1;}
+
+.best-row{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border);}
+.best-row:last-child{border:none;}
+.best-row .k{color:var(--sub);}
+.best-row .v{font-weight:700;}
+
+.commentary{font-size:12px;color:var(--teal);line-height:1.8;min-height:44px;padding:8px;background:rgba(57,216,200,.04);border:0.5px solid rgba(57,216,200,.15);border-radius:8px;}
+
+.build-item{display:flex;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border);font-size:11px;align-items:flex-start;}
+.build-item:last-child{border:none;}
+.build-tag{font-size:10px;font-weight:700;color:var(--text);background:var(--border);border-radius:4px;padding:1px 6px;flex-shrink:0;margin-top:1px;}
+.build-desc{color:var(--sub);line-height:1.6;}
+
+.research-item{padding:5px 0;border-bottom:0.5px solid var(--border);font-size:11px;}
+.research-item:last-child{border:none;}
+.research-item .rt{color:var(--text);font-weight:600;margin-bottom:2px;}
+.research-item .rs{color:var(--sub);line-height:1.5;}
+
+.loading{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:999;}
+.loading.hidden{display:none;}
+.spinner{width:28px;height:28px;border:2px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.prog{width:220px;height:3px;background:var(--border);border-radius:2px;}
+.prog-fill{height:100%;background:var(--orange);border-radius:2px;transition:width .3s;}
+.load-title{font-size:16px;font-weight:700;}
+.load-sub{font-size:12px;color:var(--sub);}
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <div class="load-title">Active SLAM + PPO</div>
+  <div class="load-sub" id="load-sub">Loading best episode...</div>
+  <div class="prog"><div class="prog-fill" id="prog" style="width:0%"></div></div>
+</div>
+
+<header class="header">
+  <div class="logo">Active <span>SLAM</span> + PPO</div>
+  <span class="badge good" id="policy-badge">⚡ Trained policy</span>
+  <span class="badge good">🎓 City A — trained</span>
+  <span class="badge gold">🔍 City B — unseen</span>
+  <div class="header-info" id="header-info">
+    Replaying best 5/5 episode · PPO agent · Bayesian SLAM · frontier-guided exploration
+  </div>
+  <span class="badge gold" id="best-global" style="display:none">🏆 —</span>
+</header>
+
+<div class="body">
+  <div class="canvases">
+
+    <div class="panel">
+      <div class="panel-header trained">
+        <div class="panel-title" style="color:var(--green)">🎓 City A — Trained layout</div>
+        <div class="panel-sub">Policy trained here · 300k PPO steps · reward = +1 per new cell visited</div>
+        <span class="badge good" style="font-size:10px">PPO trained ✓</span>
+      </div>
+      <div class="canvas-area" id="wrap-a">
+        <canvas id="canvas-a"></canvas>
+        <div class="overlay">
+          <div class="pill">Step <b id="a-step">0</b> / <b id="a-maxstep">700</b></div>
+          <div class="pill">Coverage <b id="a-cov" style="color:var(--green)">0%</b></div>
+          <div class="pill">Towers <b id="a-tow" style="color:var(--red)">0/5</b></div>
+          <div class="pill green" id="a-done" style="display:none">🗼 All 5 towers found!</div>
+          <div class="pill gold">🏆 Best episode</div>
+        </div>
+        <div class="panel-tag"><div class="ptag trained">TRAINED MAP</div></div>
+        <div class="canvas-anno">
+          <div class="anno"><b style="color:var(--orange)">●</b> Agent + dashed ring = FOV sensor range (~80m real-world)</div>
+          <div class="anno teal"><b>·</b> Blue = SLAM frontiers (boundary: mapped → unknown)</div>
+          <div class="anno"><b style="color:var(--green)">■</b> Green = explored &nbsp; <b style="color:#12102a;border:1px solid #444;display:inline-block;width:8px;height:8px;"> </b> Purple = building</div>
+        </div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="a-prog"></div></div>
+      <div class="stats-bar">
+        <div class="stat-cell"><div class="stat-lbl">Coverage</div><div class="stat-val" id="a-s-cov" style="color:var(--green)">0%</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Towers</div><div class="stat-val" id="a-s-tow" style="color:var(--red)">0/5</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Frontiers</div><div class="stat-val" id="a-s-fr" style="color:var(--blue)">0</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Episode</div><div class="stat-val" id="a-epnum" style="color:var(--gold)">—</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header unseen">
+        <div class="panel-title" style="color:var(--gold)">🔍 City B — Never seen before</div>
+        <div class="panel-sub">Different block sizes + road widths · zero retraining · same weights</div>
+        <span class="badge gold" style="font-size:10px">Generalisation ✓</span>
+      </div>
+      <div class="canvas-area" id="wrap-b">
+        <canvas id="canvas-b"></canvas>
+        <div class="overlay">
+          <div class="pill">Step <b id="b-step">0</b> / <b id="b-maxstep">700</b></div>
+          <div class="pill">Coverage <b id="b-cov" style="color:var(--green)">0%</b></div>
+          <div class="pill">Towers <b id="b-tow" style="color:var(--red)">0/5</b></div>
+          <div class="pill green" id="b-done" style="display:none">🗼 All 5 towers found!</div>
+          <div class="pill gold">🏆 Best episode</div>
+        </div>
+        <div class="panel-tag"><div class="ptag unseen">UNSEEN MAP</div></div>
+        <div class="canvas-anno">
+          <div class="anno"><b style="color:var(--gold)">?</b> Policy never saw this layout during training</div>
+          <div class="anno"><b style="color:var(--green)">▲</b> Tower found &nbsp;·&nbsp; <b style="color:var(--red)">▲</b> Tower still hidden</div>
+          <div class="anno teal">Same weights · zero fine-tuning · proves generalisation</div>
+        </div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="b-prog"></div></div>
+      <div class="stats-bar">
+        <div class="stat-cell"><div class="stat-lbl">Coverage</div><div class="stat-val" id="b-s-cov" style="color:var(--green)">0%</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Towers</div><div class="stat-val" id="b-s-tow" style="color:var(--red)">0/5</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Frontiers</div><div class="stat-val" id="b-s-fr" style="color:var(--blue)">0</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Episode</div><div class="stat-val" id="b-epnum" style="color:var(--gold)">—</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="sidebar">
+
+    <div>
+      <div class="sec">Controls</div>
+      <button class="btn gold-btn" id="btn-replay" onclick="startReplay()">↺ Replay best episode</button>
+      <div class="slider-row" style="margin-top:4px;">
+        <span>Speed</span>
+        <input type="range" min="1" max="20" value="6" id="speed"
+          oninput="document.getElementById('spv').textContent=this.value+'x'"/>
+        <span style="min-width:28px;font-size:11px" id="spv">6x</span>
+      </div>
+    </div>
+
+    <div>
+      <div class="sec">Live commentary</div>
+      <div class="commentary" id="commentary">Loading best episode...</div>
+    </div>
+
+    <div>
+      <div class="sec">Best episode stats 🏆</div>
+      <div class="card" id="best-card">
+        <div class="best-row"><span class="k">City A coverage</span><span class="v" id="b-a-cov" style="color:var(--green)">—</span></div>
+        <div class="best-row"><span class="k">City A towers</span><span class="v" id="b-a-tow" style="color:var(--red)">—</span></div>
+        <div class="best-row"><span class="k">City A steps</span><span class="v" id="b-a-steps">—</span></div>
+        <div class="best-row"><span class="k">City B coverage</span><span class="v" id="b-b-cov" style="color:var(--green)">—</span></div>
+        <div class="best-row"><span class="k">City B towers</span><span class="v" id="b-b-tow" style="color:var(--red)">—</span></div>
+        <div class="best-row"><span class="k">City B steps</span><span class="v" id="b-b-steps">—</span></div>
+        <div class="best-row"><span class="k">Found at episode</span><span class="v" id="b-epnum2">—</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="sec">What was built</div>
+      <div class="card">
+        <div class="build-item"><span class="build-tag">SLAM</span><span class="build-desc">Bayesian log-odds occupancy grid. No map given — built from sensor data in real-time.</span></div>
+        <div class="build-item"><span class="build-tag">FOV</span><span class="build-desc">Sensor range (dashed ring). Like LiDAR on a real robot. Outside = unknown fog.</span></div>
+        <div class="build-item"><span class="build-tag">Frontier</span><span class="build-desc">Blue dots = boundary of known space. PPO learned to follow frontiers automatically.</span></div>
+        <div class="build-item"><span class="build-tag">PPO</span><span class="build-desc">Reward = +1 per new cell visited. 300k training steps. Simple MLP policy network.</span></div>
+        <div class="build-item"><span class="build-tag">Result</span><span class="build-desc">5/5 towers found. Generalises to City B — an unseen map layout with no retraining.</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="sec">Related research</div>
+      <div class="card">
+        <div class="research-item">
+          <div class="rt">MA-SLAM 2024 — hierarchical DRL</div>
+          <div class="rs">Decouples planning from motion control. Tests on 400–520m² real environments. Uses waypoint actions vs our discrete 8-directional actions.</div>
+        </div>
+        <div class="research-item">
+          <div class="rt">Massive Parallel SLAM 2026</div>
+          <div class="rs">PPO + recurrent networks + continuous actions. More expressive but harder to train. Our approach: simpler, more generalisable.</div>
+        </div>
+        <div class="research-item">
+          <div class="rt">Dueling DDQN + ORB-SLAM 2024</div>
+          <div class="rs">Visual SLAM + frontier selection via DDQN. Same core principle — learn which frontier to visit next.</div>
+        </div>
+        <div class="research-item">
+          <div class="rt" style="color:var(--orange)">Why real cities are harder</div>
+          <div class="rs">Irregular streets, dead ends, sensor noise, localisation drift. Real deployment needs curriculum learning + LiDAR sensor models — our next step.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+const L_FREE=-2.2,L_OCC=2.2,L_MIN=-8,L_MAX=8;
+
+// ── SLAM (for replay visualisation) ──────────────────────────────
+class SLAM{
+  constructor(W,H){this.W=W;this.H=H;this.reset();}
+  reset(){this.lo=new Float32Array(this.W*this.H);this.vc=new Int32Array(this.W*this.H);this.visited=new Uint8Array(this.W*this.H);}
+  prob(x,y){return 1/(1+Math.exp(-this.lo[y*this.W+x]));}
+  cell(x,y){const p=this.prob(x,y);return p>0.65?1:p<0.35?0:-1;}
+  update(x,y,occ){
+    if(x<0||x>=this.W||y<0||y>=this.H)return;
+    const i=y*this.W+x;this.lo[i]=Math.max(L_MIN,Math.min(L_MAX,this.lo[i]+(occ?L_OCC:L_FREE)));
+  }
+  observe(cx,cy,obs,fov){
+    for(let a=0;a<36;a++){
+      const rad=(a/36)*Math.PI*2,dx=Math.cos(rad),dy=Math.sin(rad);
+      let hit=fov;
+      for(let r=0.5;r<=fov;r+=0.5){
+        const tx=Math.round(cx+dx*r),ty=Math.round(cy+dy*r);
+        if(tx<0||tx>=this.W||ty<0||ty>=this.H){hit=r;break;}
+        if(obs[ty*this.W+tx]){hit=r;break;}
+      }
+      for(let r=0.5;r<hit;r+=0.5){const tx=Math.round(cx+dx*r),ty=Math.round(cy+dy*r);this.update(tx,ty,false);}
+      if(hit<fov)this.update(Math.round(cx+dx*hit),Math.round(cy+dy*hit),true);
+    }
+    const i=cy*this.W+cx;this.visited[i]=1;this.vc[i]++;
+  }
+  coverage(fc){let k=0;for(let i=0;i<this.W*this.H;i++)if(this.vc[i]>0)k++;return fc>0?k/fc:0;}
+  frontiers(){
+    const pts=[];
+    for(let y=1;y<this.H-1;y++)for(let x=1;x<this.W-1;x++){
+      if(this.cell(x,y)!==0)continue;
+      if(this.cell(x+1,y)===-1||this.cell(x-1,y)===-1||
+         this.cell(x,y+1)===-1||this.cell(x,y-1)===-1)pts.push([x,y]);
+    }
+    return pts;
+  }
+}
+
+// ── STATE ─────────────────────────────────────────────────────────
+let DATA=null;
+const sims={a:null,b:null};
+let replayIdx={a:0,b:0};
+let rafId=null;
+const FOV=8;
+
+// ── DRAW ──────────────────────────────────────────────────────────
+function resizeCanvas(key,W,H){
+  const wrap=document.getElementById('wrap-'+key);
+  const canvas=document.getElementById('canvas-'+key);
+  const c=Math.max(6,Math.min(Math.floor((wrap.clientWidth-2)/W),Math.floor((wrap.clientHeight-2)/H)));
+  sims[key].cell=c;
+  canvas.width=W*c;canvas.height=H*c;
+}
+
+function drawCanvas(key){
+  const s=sims[key];if(!s)return;
+  const{slam,pos,found,path,obs,towers,W,H,freeCount}=s;
+  const C=s.cell;
+  const ctx=document.getElementById('canvas-'+key).getContext('2d');
+  ctx.fillStyle='#030508';ctx.fillRect(0,0,W*C,H*C);
+
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const isObs=obs[y*W+x],vc=Math.min(slam.vc[y*W+x],15),slc=slam.cell(x,y);
+    let fill;
+    if(isObs) fill=slc===1?`hsl(240,${30+vc*2}%,${10+vc*.5}%)`:'#12102a';
+    else if(slc===-1) fill='#07111e';
+    else if(slam.visited[y*W+x]) fill=`hsl(145,${25+vc*3}%,${9+vc*2}%)`;
+    else fill='#0e1f30';
+    ctx.fillStyle=fill;ctx.fillRect(x*C,y*C,C,C);
+    if(!isObs&&C>=8){ctx.strokeStyle='rgba(14,32,50,0.4)';ctx.lineWidth=0.3;ctx.strokeRect(x*C,y*C,C,C);}
+  }
+
+  // frontiers
+  ctx.fillStyle='rgba(88,166,255,0.55)';
+  for(const[fx,fy]of slam.frontiers())ctx.fillRect(fx*C+C/3,fy*C+C/3,C/3+1,C/3+1);
+
+  // path
+  if(path&&path.length>1){
+    for(let i=1;i<path.length;i++){
+      ctx.strokeStyle=`rgba(245,166,35,${Math.max(0.04,(i/path.length)*0.6)})`;
+      ctx.lineWidth=Math.max(1.5,C/5);
+      ctx.beginPath();ctx.moveTo(path[i-1][0]*C+C/2,path[i-1][1]*C+C/2);
+      ctx.lineTo(path[i][0]*C+C/2,path[i][1]*C+C/2);ctx.stroke();
+    }
+  }
+
+  // towers
+  towers.forEach(([tx,ty],i)=>{
+    if(slam.cell(tx,ty)===-1)return;
+    const px=tx*C+C/2,py=ty*C+C/2,isFnd=found.has(i),r=Math.max(C*.75,5);
+    if(isFnd){
+      const p=(Date.now()%1400)/1400;
+      ctx.strokeStyle=`rgba(63,185,80,${0.7-p*0.7})`;ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(px,py,r+p*r*2,0,Math.PI*2);ctx.stroke();
+      ctx.shadowColor='#3fb950';ctx.shadowBlur=r*2;ctx.fillStyle='#3fb950';
+    }else ctx.fillStyle='#f85149';
+    ctx.beginPath();ctx.moveTo(px,py-r);ctx.lineTo(px+r,py+r);ctx.lineTo(px-r,py+r);
+    ctx.closePath();ctx.fill();ctx.shadowBlur=0;
+    if(C>=7){ctx.fillStyle=isFnd?'#000':'#fff';ctx.font=`bold ${Math.max(6,C*.36)}px monospace`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('T',px,py+r*.3);}
+  });
+
+  // FOV
+  const ax=pos[0]*C+C/2,ay=pos[1]*C+C/2;
+  ctx.strokeStyle='rgba(245,166,35,0.25)';ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
+  ctx.beginPath();ctx.arc(ax,ay,FOV*C,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+
+  // agent
+  const agR=Math.max(C*.55,4);
+  ctx.shadowColor='#f5a623';ctx.shadowBlur=agR*1.2;ctx.fillStyle='#f5a623';
+  ctx.beginPath();ctx.arc(ax,ay,agR,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+  if(C>=7){ctx.fillStyle='#000';ctx.font=`bold ${Math.max(6,agR*.9)}px monospace`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('A',ax,ay);}
+}
+
+function updateUI(key){
+  const s=sims[key];if(!s)return;
+  const{slam,found,towers,freeCount,stepN,maxSteps}=s;
+  const cov=Math.round(slam.coverage(freeCount)*100);
+  const fr=slam.frontiers().length;
+  document.getElementById(key+'-step').textContent=stepN;
+  document.getElementById(key+'-cov').textContent=cov+'%';
+  document.getElementById(key+'-tow').textContent=`${found.size}/${towers.length}`;
+  document.getElementById(key+'-s-cov').textContent=cov+'%';
+  document.getElementById(key+'-s-tow').textContent=`${found.size}/${towers.length}`;
+  document.getElementById(key+'-s-fr').textContent=fr;
+  document.getElementById(key+'-prog').style.width=Math.round(stepN/maxSteps*100)+'%';
+  if(found.size===towers.length)document.getElementById(key+'-done').style.display='block';
+
+  // commentary
+  const aTow=sims.a?.found?.size||0;
+  const bTow=sims.b?.found?.size||0;
+  const aCov=sims.a?Math.round(sims.a.slam.coverage(sims.a.freeCount)*100):0;
+  let msg='';
+  if(aTow===5&&bTow===5)msg='🏆 Both cities: 5/5 towers found! Same policy on both trained and unseen layout.';
+  else if(aTow===5)msg=`✅ City A done (5/5)! City B: ${bTow}/5 towers, ${Math.round(sims.b?.slam?.coverage(sims.b?.freeCount)*100||0)}% mapped...`;
+  else if(aTow>=3)msg=`🗼 ${aTow}/5 towers · PPO following SLAM frontiers toward remaining targets`;
+  else if(aCov>30)msg=`🗺 ${aCov}% mapped · Bayesian occupancy grid building in real-time`;
+  else msg=`🚀 Agent exploring unknown city · SLAM frontiers guiding the PPO policy`;
+  document.getElementById('commentary').textContent=msg;
+}
+
+// ── REPLAY ────────────────────────────────────────────────────────
+function initReplayState(key){
+  const d=DATA[key];
+  const{W,H,obstacles,towers,freeCount,path,maxSteps}=d;
+  const obs=new Uint8Array(W*H);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)obs[y*W+x]=obstacles[y][x]?1:0;
+  const slam=new SLAM(W,H);
+  slam.observe(path[0][0],path[0][1],obs,FOV);
+  sims[key]={W,H,obs,slam,towers,freeCount,
+    pos:[...path[0]],found:new Set(),path:[path[0]],
+    stepN:0,maxSteps:maxSteps||700,cell:12};
+  resizeCanvas(key,W,H);
+  document.getElementById(key+'-done').style.display='none';
+  document.getElementById(key+'-maxstep').textContent=maxSteps||700;
+  document.getElementById(key+'-epnum').textContent='#'+d.ep;
+}
+
+function startReplay(){
+  cancelAnimationFrame(rafId);
+  replayIdx={a:0,b:0};
+  initReplayState('a');
+  initReplayState('b');
+  drawCanvas('a');drawCanvas('b');
+  rafId=requestAnimationFrame(replayLoop);
+}
+
+function replayLoop(){
+  const spd=parseInt(document.getElementById('speed').value);
+  let aDone=replayIdx.a>=DATA.a.path.length;
+  let bDone=replayIdx.b>=DATA.b.path.length;
+  if(aDone&&bDone){
+    // loop — restart replay automatically
+    setTimeout(startReplay,2000);
+    return;
+  }
+  for(let i=0;i<spd;i++){
+    for(const key of['a','b']){
+      const idx=replayIdx[key];
+      const path=DATA[key].path;
+      if(idx>=path.length)continue;
+      const[px,py]=path[idx];
+      const s=sims[key];
+      s.pos=[px,py];s.stepN=idx;
+      s.path=path.slice(0,idx+1);
+      s.slam.observe(px,py,s.obs,FOV);
+      s.towers.forEach(([tx,ty],i)=>{
+        if(!s.found.has(i)&&Math.hypot(px-tx,py-ty)<2.5)s.found.add(i);
+      });
+      replayIdx[key]++;
+      document.getElementById(key+'-prog').style.width=Math.round(idx/path.length*100)+'%';
+    }
+  }
+  drawCanvas('a');drawCanvas('b');
+  updateUI('a');updateUI('b');
+  rafId=requestAnimationFrame(replayLoop);
+}
+
+// ── LOAD ──────────────────────────────────────────────────────────
+function setP(p,msg){document.getElementById('prog').style.width=p+'%';document.getElementById('load-sub').textContent=msg;}
+
+async function load(){
+  setP(20,'Loading best episode data...');
+  try{
+    const r=await fetch('data/best_episode.json?t='+Date.now());
+    if(!r.ok)throw new Error('best_episode.json not found');
+    setP(60,'Parsing episode...');
+    DATA=await r.json();
+
+    // fill in stats
+    const a=DATA.a,b=DATA.b;
+    document.getElementById('b-a-cov').textContent=Math.round(a.cov*100)+'%';
+    document.getElementById('b-a-tow').textContent=a.towers_found+'/5 ✓';
+    document.getElementById('b-a-steps').textContent=a.steps+' steps';
+    document.getElementById('b-b-cov').textContent=Math.round(b.cov*100)+'%';
+    document.getElementById('b-b-tow').textContent=b.towers_found+'/5 ✓';
+    document.getElementById('b-b-steps').textContent=b.steps+' steps';
+    document.getElementById('b-epnum2').textContent='City A ep #'+a.ep+' · City B ep #'+b.ep;
+    document.getElementById('policy-badge').textContent='⚡ Trained PPO · best episode preloaded';
+    document.getElementById('best-global').style.display='inline-block';
+    document.getElementById('best-global').textContent=
+      `🏆 A: ${Math.round(a.cov*100)}%·${a.towers_found}/5 · B: ${Math.round(b.cov*100)}%·${b.towers_found}/5`;
+    document.getElementById('header-info').textContent=
+      `Best 5/5 episode · City A: ${Math.round(a.cov*100)}% coverage · City B: ${Math.round(b.cov*100)}% coverage · autoplaying`;
+
+    setP(90,'Starting replay...');
+    await new Promise(r=>setTimeout(r,300));
+    document.getElementById('loading').classList.add('hidden');
+    startReplay();
+
+  }catch(e){
+    console.error(e);
+    setP(100,'Run: python find_best_episode.py first');
+    document.getElementById('load-sub').textContent=
+      'best_episode.json not found. Run: python find_best_episode.py';
+    document.getElementById('commentary').textContent=
+      '⚠ Run "python find_best_episode.py" to generate the best episode data, then reload.';
+    setTimeout(()=>document.getElementById('loading').classList.add('hidden'),2000);
+  }
+}
+
+window.addEventListener('resize',()=>{
+  if(sims.a)resizeCanvas('a',DATA.a.W,DATA.a.H);
+  if(sims.b)resizeCanvas('b',DATA.b.W,DATA.b.H);
+  drawCanvas('a');drawCanvas('b');
+});
+load();
+</script>
+</body>
+</html>

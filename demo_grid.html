@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Active SLAM + PPO — Kendall Square, Boston</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#0a0e18;--surface:#0f1520;--border:#1e2a3a;
+  --text:#e6edf3;--sub:#5a7a9a;--green:#3fb950;
+  --orange:#f5a623;--red:#f85149;--purple:#a78bfa;--blue:#58a6ff;
+  --teal:#39d8c8;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── header ── */
+.header{padding:10px 20px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--surface);flex-shrink:0;flex-wrap:wrap;}
+.logo{font-size:15px;font-weight:700;letter-spacing:-.3px;}
+.logo span{color:var(--orange);}
+.badge{padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;border:0.5px solid;}
+.badge.good{background:rgba(63,185,80,.12);border-color:var(--green);color:var(--green);}
+.badge.warn{background:rgba(245,166,35,.12);border-color:var(--orange);color:var(--orange);}
+.badge.blue{background:rgba(88,166,255,.12);border-color:var(--blue);color:var(--blue);}
+.header-info{font-size:11px;color:var(--sub);flex:1;}
+.best-badge{background:rgba(57,216,200,.12);border:0.5px solid var(--teal);color:var(--teal);padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;display:none;}
+
+/* ── body ── */
+.body{display:flex;flex:1;overflow:hidden;}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:var(--bg);display:flex;align-items:center;justify-content:center;}
+canvas{display:block;image-rendering:pixelated;}
+
+/* ── overlay pills ── */
+.overlay{position:absolute;top:12px;left:12px;display:flex;flex-direction:column;gap:5px;pointer-events:none;}
+.pill{background:rgba(10,14,24,.92);border:0.5px solid var(--border);border-radius:14px;padding:4px 12px;font-size:12px;color:var(--sub);backdrop-filter:blur(8px);}
+.pill b{color:var(--text);}
+.pill.highlight{border-color:var(--green);color:var(--green);}
+.pill.best{border-color:var(--teal);color:var(--teal);}
+
+/* ── map label overlay ── */
+.map-labels{position:absolute;bottom:12px;left:12px;pointer-events:none;display:flex;flex-direction:column;gap:4px;}
+.map-label{background:rgba(10,14,24,.88);border:0.5px solid var(--border);border-radius:8px;padding:5px 10px;font-size:11px;color:var(--sub);}
+.map-label b{color:var(--text);}
+
+/* ── right panel ── */
+.panel{width:300px;flex-shrink:0;border-left:0.5px solid var(--border);background:var(--surface);padding:14px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;}
+
+.section-title{font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;display:flex;align-items:center;gap:6px;}
+.section-title::after{content:'';flex:1;height:0.5px;background:var(--border);}
+
+.card{background:var(--bg);border:0.5px solid var(--border);border-radius:10px;padding:12px;}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.stat .lbl{font-size:10px;color:var(--sub);margin-bottom:2px;}
+.stat .val{font-size:20px;font-weight:600;}
+.stat .unit{font-size:11px;color:var(--sub);font-weight:400;}
+
+.btn{width:100%;padding:9px;border-radius:8px;border:0.5px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:13px;font-family:inherit;margin-bottom:5px;font-weight:500;transition:all .15s;}
+.btn:hover{border-color:var(--orange);color:var(--orange);}
+.btn.primary{background:var(--orange);border-color:var(--orange);color:#000;font-weight:700;}
+.btn.stop{background:rgba(248,81,73,.12);border-color:var(--red);color:var(--red);}
+.btn.teal{background:rgba(57,216,200,.12);border-color:var(--teal);color:var(--teal);}
+
+.slider-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);margin-bottom:6px;}
+input[type=range]{accent-color:var(--orange);flex:1;height:3px;}
+.slider-val{min-width:32px;font-size:11px;text-align:right;}
+
+/* ── best episode display ── */
+.best-card{background:rgba(57,216,200,.05);border:0.5px solid var(--teal);border-radius:10px;padding:12px;display:none;}
+.best-stat{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 0;border-bottom:0.5px solid rgba(57,216,200,.15);}
+.best-stat:last-child{border:none;}
+.best-stat .k{color:var(--sub);}
+.best-stat .v{color:var(--teal);font-weight:600;}
+
+/* ── sparklines ── */
+.spark-row{margin-bottom:8px;}
+.spark-lbl{display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;}
+.spark-lbl .k{color:var(--sub);}
+svg.spark{display:block;width:100%;border-radius:3px;}
+
+/* ── insight rows ── */
+.insight{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;border-bottom:0.5px solid var(--border);}
+.insight:last-child{border:none;}
+.insight .k{color:var(--sub);}
+.ib{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;}
+.ib.good{background:rgba(63,185,80,.15);color:var(--green);}
+.ib.warn{background:rgba(245,166,35,.15);color:var(--orange);}
+.ib.bad{background:rgba(248,81,73,.15);color:var(--red);}
+.ib.blue{background:rgba(88,166,255,.15);color:var(--blue);}
+
+/* ── legend ── */
+.legend-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
+.leg{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--sub);}
+.ld{width:12px;height:12px;border-radius:2px;flex-shrink:0;}
+
+/* ── explanation ── */
+.explain{font-size:11px;color:var(--sub);line-height:1.8;border-left:2px solid var(--border);padding-left:8px;}
+.explain b{color:var(--text);}
+
+/* ── loading ── */
+.loading{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:999;}
+.loading.hidden{display:none;}
+.spinner{width:28px;height:28px;border:2px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.prog{width:220px;height:3px;background:var(--border);border-radius:2px;}
+.prog-fill{height:100%;background:var(--orange);border-radius:2px;transition:width .3s;}
+.load-title{font-size:16px;font-weight:600;}
+.load-sub{font-size:12px;color:var(--sub);}
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <div class="load-title">Active SLAM + PPO</div>
+  <div class="load-sub" id="load-sub">Initialising...</div>
+  <div class="prog"><div class="prog-fill" id="prog" style="width:0%"></div></div>
+</div>
+
+<header class="header">
+  <div class="logo">Active <span>SLAM</span> + PPO</div>
+  <span class="badge good" id="policy-badge">⚡ Trained policy</span>
+  <span class="badge blue" id="grid-badge">📍 Loading...</span>
+  <span class="best-badge" id="best-badge">🏆 Showing best episode</span>
+  <div class="header-info" id="header-info">Real OSM occupancy grid · PPO exploration policy</div>
+</header>
+
+<div class="body">
+  <div class="canvas-wrap" id="canvas-wrap">
+    <canvas id="canvas"></canvas>
+
+    <div class="overlay">
+      <div class="pill">Episode <b id="ol-ep">0</b> · Step <b id="ol-step">0</b>/<b id="ol-max">1200</b></div>
+      <div class="pill">Road coverage <b id="ol-cov" style="color:var(--green)">0%</b></div>
+      <div class="pill">Active frontiers <b id="ol-fr">0</b></div>
+      <div class="pill highlight" id="ol-done" style="display:none">🗼 All towers located!</div>
+      <div class="pill best" id="ol-best" style="display:none">🏆 Best episode replay</div>
+    </div>
+
+    <div class="map-labels">
+      <div class="map-label"><b>Green cells</b> = explored roads &nbsp;·&nbsp; <b>Dark</b> = buildings/unknown</div>
+      <div class="map-label" id="ml-grid">Loading grid info...</div>
+    </div>
+  </div>
+
+  <div class="panel">
+
+    <!-- live metrics -->
+    <div>
+      <div class="section-title">Live metrics</div>
+      <div class="card">
+        <div class="stat-grid">
+          <div class="stat"><div class="lbl">Episode</div><div class="val" id="s-ep">0</div></div>
+          <div class="stat"><div class="lbl">Step</div><div class="val" id="s-step">0</div></div>
+          <div class="stat"><div class="lbl">Road coverage</div><div class="val" id="s-cov" style="color:var(--green)">0<span class="unit">%</span></div></div>
+          <div class="stat"><div class="lbl">Towers found</div><div class="val" id="s-tow" style="color:var(--red)">0/0</div></div>
+          <div class="stat"><div class="lbl">Value V(s)</div><div class="val" id="s-val" style="color:var(--purple);font-size:15px">—</div></div>
+          <div class="stat"><div class="lbl">Entropy H(π)</div><div class="val" id="s-ent" style="color:var(--blue);font-size:15px">—</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- controls -->
+    <div>
+      <div class="section-title">Controls</div>
+      <button class="btn primary" id="btn-run" onclick="toggleRun()">▶ Run policy</button>
+      <button class="btn teal" id="btn-best" onclick="showBest()">🏆 Replay best episode</button>
+      <button class="btn" onclick="newEp()">↺ New episode</button>
+      <div class="slider-row">
+        <span>Speed</span>
+        <input type="range" min="1" max="100" value="50" id="speed"
+          oninput="document.getElementById('spv').textContent=this.value+'x'"/>
+        <span class="slider-val" id="spv">50x</span>
+      </div>
+      <div class="slider-row">
+        <span>Zoom</span>
+        <input type="range" min="4" max="22" value="12" id="zoom"
+          oninput="CELL=parseInt(this.value);document.getElementById('zpv').textContent=this.value+'px';resizeCanvas();drawMap()"/>
+        <span class="slider-val" id="zpv">12px</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">
+        <label style="font-size:11px;color:var(--sub);display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="chk-fr" checked/> Frontiers
+        </label>
+        <label style="font-size:11px;color:var(--sub);display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="chk-path" checked/> Path trail
+        </label>
+        <label style="font-size:11px;color:var(--sub);display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="chk-fov" checked/> FOV ring
+        </label>
+      </div>
+    </div>
+
+    <!-- best episode -->
+    <div>
+      <div class="section-title">Best episode</div>
+      <div class="best-card" id="best-card">
+        <div class="best-stat"><span class="k">Coverage achieved</span><span class="v" id="best-cov">—</span></div>
+        <div class="best-stat"><span class="k">Towers found</span><span class="v" id="best-tow">—</span></div>
+        <div class="best-stat"><span class="k">Steps taken</span><span class="v" id="best-steps">—</span></div>
+        <div class="best-stat"><span class="k">Episode #</span><span class="v" id="best-epnum">—</span></div>
+      </div>
+      <div style="font-size:11px;color:var(--sub);margin-top:6px;">Run a few episodes first to record the best.</div>
+    </div>
+
+    <!-- history -->
+    <div>
+      <div class="section-title">Episode history</div>
+      <div class="card">
+        <div class="spark-row">
+          <div class="spark-lbl"><span class="k">Road coverage %</span><span id="sp-cv" style="color:var(--green)">—</span></div>
+          <svg class="spark" id="sp-cov" height="36"></svg>
+        </div>
+        <div class="spark-row">
+          <div class="spark-lbl"><span class="k">Towers found</span><span id="sp-tv" style="color:var(--red)">—</span></div>
+          <svg class="spark" id="sp-tow" height="36"></svg>
+        </div>
+        <div class="spark-row">
+          <div class="spark-lbl"><span class="k">Value V(s) live</span><span id="sp-vv" style="color:var(--purple)">—</span></div>
+          <svg class="spark" id="sp-val" height="36"></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- policy assessment -->
+    <div>
+      <div class="section-title">Policy assessment</div>
+      <div class="card">
+        <div class="insight"><span class="k">Road coverage</span><span id="h-cov">—</span></div>
+        <div class="insight"><span class="k">Tower discovery</span><span id="h-tow">—</span></div>
+        <div class="insight"><span class="k">Frontier tracking</span><span id="h-fr">—</span></div>
+        <div class="insight"><span class="k">Policy confidence</span><span id="h-ent">—</span></div>
+        <div class="insight"><span class="k">Exploration mode</span><span id="h-mode">—</span></div>
+      </div>
+    </div>
+
+    <!-- legend -->
+    <div>
+      <div class="section-title">Legend</div>
+      <div class="card">
+        <div class="legend-grid">
+          <div class="leg"><div class="ld" style="background:#1a3a2a;"></div>Explored road</div>
+          <div class="leg"><div class="ld" style="background:#0d1320;"></div>Unmapped road</div>
+          <div class="leg"><div class="ld" style="background:#0a0e18;border:0.5px solid #1e2a3a;"></div>Building/obstacle</div>
+          <div class="leg"><div class="ld" style="background:var(--orange);border-radius:50%;"></div>Agent (PPO)</div>
+          <div class="leg"><div class="ld" style="background:var(--green);border-radius:50%;"></div>Tower found</div>
+          <div class="leg"><div class="ld" style="background:var(--red);border-radius:50%;"></div>Tower hidden</div>
+          <div class="leg"><div class="ld" style="background:rgba(88,166,255,.6);"></div>SLAM frontier</div>
+          <div class="leg"><div class="ld" style="background:rgba(245,166,35,.3);"></div>Path trail</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- what is this -->
+    <div>
+      <div class="section-title">What is this?</div>
+      <div class="card">
+        <div class="explain">
+          <b>Occupancy grid</b> built from real OpenStreetMap data — buildings are obstacles, roads are navigable space.<br><br>
+          <b>SLAM</b> (Simultaneous Localisation and Mapping) builds the map in real-time from a limited sensor range — the agent can only see within its FOV circle.<br><br>
+          <b>PPO policy</b> (Proximal Policy Optimisation) decides where to go next, trained to maximise road coverage and find electricity towers efficiently.<br><br>
+          <b>Frontiers</b> (blue dots) = boundary between explored and unknown space — the key signal for exploration.
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+const ACTS=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+const L_FREE=-2.2,L_OCC=2.2,L_MIN=-8,L_MAX=8;
+let CELL=12;
+
+let NET=null,GRID=null,state=null;
+let running=false,rafId=null;
+let histCov=[],histTow=[],histVal=[];
+let bestEp=null; // {cov, towers, steps, epNum, path, foundSet}
+let epCount=0;
+let replayMode=false;
+
+// ══════════════════════════════════════════════════════════════════
+// SLAM
+class SLAM{
+  constructor(W,H){this.W=W;this.H=H;this.reset();}
+  reset(){this.lo=new Float32Array(this.W*this.H);this.vc=new Int32Array(this.W*this.H);this.visited=new Uint8Array(this.W*this.H);}
+  prob(x,y){return 1/(1+Math.exp(-this.lo[y*this.W+x]));}
+  cell(x,y){const p=this.prob(x,y);return p>0.65?1:p<0.35?0:-1;}
+  update(x,y,occ){
+    if(x<0||x>=this.W||y<0||y>=this.H)return;
+    const i=y*this.W+x;
+    this.lo[i]=Math.max(L_MIN,Math.min(L_MAX,this.lo[i]+(occ?L_OCC:L_FREE)));
+  }
+  observe(cx,cy,obs,fov){
+    for(let a=0;a<36;a++){
+      const rad=(a/36)*Math.PI*2,dx=Math.cos(rad),dy=Math.sin(rad);
+      let hit=fov;
+      for(let r=0.5;r<=fov;r+=0.5){
+        const tx=Math.round(cx+dx*r),ty=Math.round(cy+dy*r);
+        if(tx<0||tx>=this.W||ty<0||ty>=this.H){hit=r;break;}
+        if(obs[ty*this.W+tx]){hit=r;break;}
+      }
+      for(let r=0.5;r<hit;r+=0.5){const tx=Math.round(cx+dx*r),ty=Math.round(cy+dy*r);this.update(tx,ty,false);}
+      if(hit<fov)this.update(Math.round(cx+dx*hit),Math.round(cy+dy*hit),true);
+    }
+    const i=cy*this.W+cx;this.visited[i]=1;this.vc[i]++;
+  }
+  coverage(freeCount){
+    let k=0;
+    for(let i=0;i<this.W*this.H;i++) if(this.lo[i]<-0.5) k++;
+    return freeCount>0?k/freeCount:0;
+  }
+  frontiers(){
+    const pts=[];
+    for(let y=1;y<this.H-1;y++) for(let x=1;x<this.W-1;x++){
+      if(this.cell(x,y)!==0)continue;
+      if(this.cell(x+1,y)===-1||this.cell(x-1,y)===-1||
+         this.cell(x,y+1)===-1||this.cell(x,y-1)===-1)pts.push([x,y]);
+    }
+    return pts;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// OBS
+function buildObs(slam,pos,found,stepN,cfg){
+  const{W,H,fov,maxSteps,towers,patchR,G,freeCount}=cfg;
+  const patch=[];
+  for(let dy=-patchR;dy<=patchR;dy++) for(let dx=-patchR;dx<=patchR;dx++){
+    const x=pos[0]+dx,y=pos[1]+dy;
+    if(x<0||x>=W||y<0||y>=H)patch.push(0);
+    else patch.push((slam.prob(x,y)-0.5)*2);
+  }
+  const global=[];
+  for(let gy=0;gy<G;gy++) for(let gx=0;gx<G;gx++){
+    const mx=Math.floor(gx*W/G),my=Math.floor(gy*H/G);
+    global.push((slam.prob(mx,my)-0.5)*2);
+  }
+  const fronts=slam.frontiers();
+  let fdx=0,fdy=0,fdist=1;
+  if(fronts.length){
+    let best=Infinity,bx=0,by=0;
+    for(const[fx,fy]of fronts){const d=Math.hypot(fx-pos[0],fy-pos[1]);if(d<best){best=d;bx=fx;by=fy;}}
+    const ang=Math.atan2(by-pos[1],bx-pos[0]);
+    fdx=Math.cos(ang);fdy=Math.sin(ang);fdist=Math.min(best/Math.hypot(W,H),1);
+  }
+  const cov=slam.coverage(freeCount);
+  return new Float32Array([...patch,...global,pos[0]/W,pos[1]/H,cov,found.size/Math.max(1,towers.length),fdx,fdy,fdist,stepN/maxSteps]);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// NET
+function buildNet(data){
+  const w=data.weights,obsDim=data.info.obs_dim;
+  const get=n=>{if(!w[n]){console.error('Missing:',n);return null;}return new Float32Array(w[n].data);};
+  const W0=get('net.0.weight'),b0=get('net.0.bias');
+  const W2=get('net.2.weight'),b2=get('net.2.bias');
+  const Wp=get('policy_head.weight'),bp=get('policy_head.bias');
+  const Wv=get('value_head.weight'),bv=get('value_head.bias');
+  if(!W0||!W2||!Wp||!Wv){console.warn('Missing weights');return buildFrontierNet();}
+  console.log('✓ MLP loaded, obs_dim=',obsDim);
+  function linear(x,W,b,inD,outD,relu=false){
+    const out=new Float32Array(outD);
+    for(let j=0;j<outD;j++){let s=b[j];for(let i=0;i<inD;i++)s+=x[i]*W[j*inD+i];out[j]=relu?Math.max(0,s):s;}
+    return out;
+  }
+  function softmax(x){const m=Math.max(...x),e=x.map(v=>Math.exp(v-m)),s=e.reduce((a,b)=>a+b,0);return e.map(v=>v/s);}
+  return{
+    act(obs){
+      let o=obs;
+      if(obs.length!==obsDim){o=new Float32Array(obsDim);o.set(obs.slice(0,obsDim));}
+      const h1=linear(o,W0,b0,obsDim,256,true);
+      const h2=linear(h1,W2,b2,256,128,true);
+      const logits=linear(h2,Wp,bp,128,8,false);
+      const value=linear(h2,Wv,bv,128,1,false)[0];
+      const probs=softmax(Array.from(logits).map(v=>v/1.3));
+      let r=Math.random(),c=0,action=7;
+      for(let i=0;i<probs.length;i++){c+=probs[i];if(r<c){action=i;break;}}
+      const entropy=-probs.reduce((s,p)=>s+(p>1e-8?p*Math.log(p):0),0);
+      return{action,value,entropy};
+    }
+  };
+}
+
+function buildFrontierNet(){
+  return{act(obs){
+    const n=obs.length,fdx=obs[n-5]||0,fdy=obs[n-4]||0;
+    const angle=Math.atan2(fdy,fdx),sector=Math.round(angle/(Math.PI/4));
+    const map={0:0,1:4,2:2,3:6,'-4':1,'-3':7,'-2':3,'-1':5};
+    const a=map[sector]??0;
+    return{action:Math.random()<0.82?a:Math.floor(Math.random()*8),value:0,entropy:1.5};
+  }};
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EPISODE
+function initEpisode(){
+  if(!GRID||!NET)return;
+  replayMode=false;
+  document.getElementById('ol-best').style.display='none';
+  document.getElementById('best-badge').style.display='none';
+
+  const{W,H,obstacles,towers,start}=GRID;
+  const obs=new Uint8Array(W*H);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++)
+    obs[y*W+x]=obstacles[y][x]?1:0;
+  let freeCount=0;
+  for(let i=0;i<obs.length;i++) if(!obs[i]) freeCount++;
+
+  const fov=6,maxSteps=1200,patchR=5,G=16;
+  const sx=start[0],sy=start[1];
+  const slam=new SLAM(W,H);
+  slam.observe(sx,sy,obs,fov);
+  const cfg={W,H,fov,maxSteps,towers,patchR,G,freeCount};
+
+  state={cfg,obs,slam,pos:[sx,sy],found:new Set(),stepN:0,
+    ep:epCount,path:[[sx,sy]],lastVal:0,lastEnt:0,
+    obsVec:buildObs(slam,[sx,sy],new Set(),0,cfg)};
+
+  document.getElementById('ol-max').textContent=maxSteps;
+  document.getElementById('ol-done').style.display='none';
+  resizeCanvas();drawMap();updateUI();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BEST EPISODE REPLAY
+function showBest(){
+  if(!bestEp){alert('Run a few episodes first!');return;}
+  running=false;cancelAnimationFrame(rafId);
+  document.getElementById('btn-run').textContent='▶ Run policy';
+  document.getElementById('btn-run').className='btn primary';
+
+  // replay best path
+  replayMode=true;
+  document.getElementById('ol-best').style.display='block';
+  document.getElementById('best-badge').style.display='inline-block';
+
+  const{W,H,obstacles,towers}=GRID;
+  const obs=new Uint8Array(W*H);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++) obs[y*W+x]=obstacles[y][x]?1:0;
+  let freeCount=0;
+  for(let i=0;i<obs.length;i++) if(!obs[i]) freeCount++;
+
+  const fov=6,maxSteps=1200,patchR=5,G=16;
+  const slam=new SLAM(W,H);
+  // replay the path
+  for(const[px,py] of bestEp.path){
+    slam.observe(px,py,obs,fov);
+  }
+  const cfg={W,H,fov,maxSteps,towers,patchR,G,freeCount};
+  state={cfg,obs,slam,pos:bestEp.path[bestEp.path.length-1],
+    found:new Set(bestEp.foundSet),stepN:bestEp.steps,
+    ep:bestEp.epNum,path:bestEp.path,lastVal:0,lastEnt:0,
+    obsVec:new Float32Array((2*patchR+1)**2+G*G+8)};
+
+  drawMap();
+  // show stats
+  document.getElementById('s-cov').innerHTML=`${Math.round(bestEp.cov*100)}<span class="unit">%</span>`;
+  document.getElementById('s-tow').textContent=`${bestEp.towers}/${cfg.towers.length}`;
+  document.getElementById('s-step').textContent=bestEp.steps;
+  document.getElementById('ol-cov').textContent=Math.round(bestEp.cov*100)+'%';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STEP
+function simStep(){
+  if(replayMode)return;
+  const s=state;
+  const{cfg,obs,slam}=s;
+  const{W,H,fov,maxSteps,towers,freeCount}=cfg;
+
+  const{action,value,entropy}=NET.act(s.obsVec);
+  const[dx,dy]=ACTS[action];
+  const nx=Math.max(0,Math.min(W-1,s.pos[0]+dx));
+  const ny=Math.max(0,Math.min(H-1,s.pos[1]+dy));
+  if(!obs[ny*W+nx])s.pos=[nx,ny];
+  slam.observe(s.pos[0],s.pos[1],obs,fov);
+  s.stepN++;s.lastVal=value;s.lastEnt=entropy;
+  s.path.push([...s.pos]);
+  if(s.path.length>1000)s.path.shift();
+
+  towers.forEach(([tx,ty],i)=>{
+    if(!s.found.has(i)&&Math.hypot(s.pos[0]-tx,s.pos[1]-ty)<2.5)s.found.add(i);
+  });
+
+  const cov=slam.coverage(freeCount);
+  const done=s.found.size===towers.length||s.stepN>=maxSteps;
+
+  if(done){
+    // record if best
+    if(!bestEp||cov>bestEp.cov||(cov===bestEp.cov&&s.found.size>bestEp.towers)){
+      bestEp={cov,towers:s.found.size,steps:s.stepN,epNum:epCount,
+              path:[...s.path],foundSet:[...s.found]};
+      updateBestCard();
+    }
+    histCov.push(Math.round(cov*100));
+    histTow.push(s.found.size);
+    if(histCov.length>60){histCov.shift();histTow.shift();}
+    epCount++;
+    initEpisode();
+    return;
+  }
+  histVal.push(Math.round(value*10)/10);
+  if(histVal.length>200)histVal.shift();
+  s.obsVec=buildObs(slam,s.pos,s.found,s.stepN,cfg);
+}
+
+function updateBestCard(){
+  if(!bestEp)return;
+  document.getElementById('best-card').style.display='block';
+  document.getElementById('best-cov').textContent=Math.round(bestEp.cov*100)+'%';
+  document.getElementById('best-tow').textContent=`${bestEp.towers} / ${GRID.towers.length}`;
+  document.getElementById('best-steps').textContent=bestEp.steps;
+  document.getElementById('best-epnum').textContent='#'+bestEp.epNum;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DRAW
+function resizeCanvas(){
+  if(!GRID)return;
+  const wrap=document.getElementById('canvas-wrap');
+  const canvas=document.getElementById('canvas');
+  const maxW=wrap.clientWidth-20,maxH=wrap.clientHeight-40;
+  const fitCell=Math.min(Math.floor(maxW/GRID.W),Math.floor(maxH/GRID.H));
+  CELL=Math.max(4,Math.min(fitCell,CELL));
+  canvas.width=GRID.W*CELL;
+  canvas.height=GRID.H*CELL;
+  document.getElementById('zoom').value=CELL;
+  document.getElementById('zpv').textContent=CELL+'px';
+}
+
+function drawMap(){
+  if(!state||!GRID)return;
+  const{cfg,obs,slam,pos,found,path}=state;
+  const{W,H,fov,towers}=cfg;
+  const C=CELL;
+  const canvas=document.getElementById('canvas');
+  const ctx=canvas.getContext('2d');
+  const showFr=document.getElementById('chk-fr').checked;
+  const showPath=document.getElementById('chk-path').checked;
+  const showFov=document.getElementById('chk-fov').checked;
+
+  ctx.fillStyle='#060a10';ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const isObs=obs[y*W+x];
+    const slc=slam.cell(x,y);
+    const vc=Math.min(slam.vc[y*W+x],15);
+    let fill;
+    if(isObs){
+      fill=slc===1?`hsl(220,${18+vc}%,${8+vc*0.5}%)`:'#070b12';
+    } else {
+      if(slc===-1)fill='#0c1220';
+      else if(slam.visited[y*W+x]){
+        const g=8+vc*2;
+        fill=`hsl(145,${20+vc*2}%,${g}%)`;
+      } else fill='#101a2a';
+    }
+    ctx.fillStyle=fill;
+    ctx.fillRect(x*C,y*C,C,C);
+  }
+
+  // subtle road outlines
+  if(C>=8){
+    ctx.strokeStyle='rgba(30,60,90,0.3)';ctx.lineWidth=0.5;
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++)
+      if(!obs[y*W+x])ctx.strokeRect(x*C,y*C,C,C);
+  }
+
+  // frontiers
+  if(showFr){
+    ctx.fillStyle='rgba(88,166,255,0.55)';
+    for(const[fx,fy]of slam.frontiers())
+      ctx.fillRect(fx*C+C/3,fy*C+C/3,C/3+1,C/3+1);
+  }
+
+  // path
+  if(showPath&&path.length>1){
+    for(let i=1;i<path.length;i++){
+      const alpha=Math.max(0.04,(i/path.length)*0.6);
+      ctx.strokeStyle=`rgba(245,166,35,${alpha})`;
+      ctx.lineWidth=Math.max(1.5,C/6);
+      ctx.beginPath();
+      ctx.moveTo(path[i-1][0]*C+C/2,path[i-1][1]*C+C/2);
+      ctx.lineTo(path[i][0]*C+C/2,path[i][1]*C+C/2);
+      ctx.stroke();
+    }
+  }
+
+  // towers
+  towers.forEach(([tx,ty],i)=>{
+    if(slam.cell(tx,ty)===-1)return;
+    const px=tx*C+C/2,py=ty*C+C/2;
+    const isFnd=found.has(i);
+    const r=Math.max(C*.75,6);
+    if(isFnd){
+      const pulse=(Date.now()%1500)/1500;
+      ctx.strokeStyle=`rgba(63,185,80,${0.7-pulse*0.7})`;
+      ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(px,py,r+pulse*r*2,0,Math.PI*2);ctx.stroke();
+      ctx.shadowColor='#3fb950';ctx.shadowBlur=r*2;
+      ctx.fillStyle='#3fb950';
+    } else ctx.fillStyle='#f85149';
+    ctx.beginPath();ctx.moveTo(px,py-r);ctx.lineTo(px+r,py+r);ctx.lineTo(px-r,py+r);
+    ctx.closePath();ctx.fill();ctx.shadowBlur=0;
+    if(C>=8){
+      ctx.fillStyle=isFnd?'#000':'#fff';
+      ctx.font=`bold ${Math.max(7,C*.38)}px monospace`;
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('T',px,py+r*.3);
+    }
+  });
+
+  // FOV
+  if(showFov){
+    const ax=pos[0]*C+C/2,ay=pos[1]*C+C/2;
+    ctx.strokeStyle='rgba(245,166,35,0.18)';ctx.lineWidth=1;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.arc(ax,ay,fov*C,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+  }
+
+  // agent
+  const ax=pos[0]*C+C/2,ay=pos[1]*C+C/2,agR=Math.max(C*.55,5);
+  ctx.shadowColor='#f5a623';ctx.shadowBlur=agR;
+  ctx.fillStyle='#f5a623';
+  ctx.beginPath();ctx.arc(ax,ay,agR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  if(C>=8){
+    ctx.fillStyle='#000';ctx.font=`bold ${Math.max(7,agR*.9)}px monospace`;
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('A',ax,ay);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// UI
+function updateUI(){
+  if(!state)return;
+  const{stepN,found,cfg,slam,lastVal,lastEnt,ep}=state;
+  const cov=Math.round(slam.coverage(cfg.freeCount)*100);
+  const fronts=slam.frontiers().length;
+  const b=(t,c)=>`<span class="ib ${c}">${t}</span>`;
+
+  document.getElementById('s-ep').textContent=epCount;
+  document.getElementById('ol-ep').textContent=epCount;
+  document.getElementById('s-step').textContent=stepN;
+  document.getElementById('ol-step').textContent=stepN;
+  document.getElementById('s-cov').innerHTML=`${cov}<span class="unit">%</span>`;
+  document.getElementById('ol-cov').textContent=cov+'%';
+  document.getElementById('s-tow').textContent=`${found.size}/${cfg.towers.length}`;
+  document.getElementById('ol-fr').textContent=fronts;
+  document.getElementById('s-val').textContent=lastVal.toFixed(2);
+  document.getElementById('s-ent').textContent=lastEnt.toFixed(2);
+
+  if(found.size===cfg.towers.length)
+    document.getElementById('ol-done').style.display='block';
+
+  spark('sp-cov',histCov,'#3fb950',100);
+  spark('sp-tow',histTow,'#f85149',cfg.towers.length);
+  spark('sp-val',histVal,'#a78bfa',null);
+  if(histCov.length){
+    document.getElementById('sp-cv').textContent=histCov[histCov.length-1]+'%';
+    document.getElementById('sp-tv').textContent=histTow[histTow.length-1]+'/'+cfg.towers.length;
+  }
+  document.getElementById('sp-vv').textContent=lastVal.toFixed(1);
+
+  document.getElementById('h-cov').innerHTML=cov>50?b('Good','good'):cov>30?b('Fair','warn'):b('Low','bad');
+  document.getElementById('h-tow').innerHTML=found.size===cfg.towers.length?b('All found ✓','good'):found.size>0?b('In progress','warn'):b('Searching','bad');
+  document.getElementById('h-fr').innerHTML=fronts>10?b('Active','good'):fronts>0?b('Low','warn'):b('Mapped','good');
+  document.getElementById('h-ent').innerHTML=lastEnt>1.5?b('High','blue'):lastEnt>0.5?b('Moderate','warn'):b('Confident','good');
+  document.getElementById('h-mode').innerHTML=fronts>5?b('Exploring','good'):found.size<cfg.towers.length?b('Targeting','warn'):b('Complete','good');
+}
+
+function spark(id,data,color,maxVal){
+  const svg=document.getElementById(id);
+  if(!svg||data.length<2)return;
+  const W2=svg.getBoundingClientRect().width||260,H2=36;
+  const max=maxVal||Math.max(...data,1),min=Math.min(...data,0),r=max-min||1;
+  const pts=data.map((v,i)=>`${(i/(data.length-1))*W2},${H2-2-(((v-min)/r)*(H2-4))}`).join(' ');
+  svg.innerHTML=`<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+    <polyline points="0,${H2} ${pts} ${W2},${H2}" fill="${color}" fill-opacity="0.1" stroke="none"/>`;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LOOP
+function loop(){
+  if(!running)return;
+  const spd=parseInt(document.getElementById('speed').value);
+  const n=Math.max(1,Math.floor(spd/8));
+  for(let i=0;i<n&&running;i++)simStep();
+  drawMap();updateUI();
+  rafId=requestAnimationFrame(loop);
+}
+
+function toggleRun(){
+  if(replayMode){replayMode=false;initEpisode();}
+  running=!running;
+  const btn=document.getElementById('btn-run');
+  btn.textContent=running?'⏸ Pause':'▶ Run policy';
+  btn.className='btn '+(running?'stop':'primary');
+  if(running){if(!state)initEpisode();loop();}
+  else cancelAnimationFrame(rafId);
+}
+
+function newEp(){
+  running=false;cancelAnimationFrame(rafId);
+  document.getElementById('btn-run').textContent='▶ Run policy';
+  document.getElementById('btn-run').className='btn primary';
+  initEpisode();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LOAD
+function prog(p,msg){
+  document.getElementById('prog').style.width=p+'%';
+  document.getElementById('load-sub').textContent=msg;
+}
+
+async function load(){
+  prog(10,'Loading trained policy...');
+  try{
+    const r=await fetch('weights.json?t='+Date.now());
+    if(!r.ok)throw new Error();
+    prog(40,'Parsing weights...');
+    const data=await r.json();
+    NET=buildNet(data);
+    document.getElementById('policy-badge').textContent=
+      `⚡ Trained · ${(data.info.train_steps||0).toLocaleString()} steps`;
+  }catch(e){
+    NET=buildFrontierNet();
+    document.getElementById('policy-badge').textContent='⚠ Frontier policy (no weights)';
+    document.getElementById('policy-badge').className='badge warn';
+  }
+
+  prog(60,'Loading city grid...');
+  try{
+    const r=await fetch('data/real_grid.json?t='+Date.now());
+    if(!r.ok)throw new Error();
+    prog(80,'Parsing grid...');
+    GRID=await r.json();
+    const{W,H,cell_size,radius,name,stats}=GRID;
+    document.getElementById('grid-badge').textContent='📍 '+name;
+    document.getElementById('grid-badge').className='badge blue';
+    document.getElementById('header-info').textContent=
+      `${W}×${H} grid · ${cell_size}m/cell · ${radius}m radius · ${stats.free_pct}% roads · source: OpenStreetMap`;
+    document.getElementById('ml-grid').innerHTML=
+      `<b>${name}</b> · ${W*cell_size}m × ${H*cell_size}m area · ${stats.free_cells} navigable cells`;
+    console.log('Grid:',W,'x',H,'free%:',stats.free_pct);
+  }catch(e){
+    console.warn('No real_grid.json — using synthetic');
+    GRID=makeSynth();
+    document.getElementById('grid-badge').textContent='⚠ Synthetic grid';
+  }
+
+  prog(100,'Ready');
+  await new Promise(r=>setTimeout(r,400));
+  document.getElementById('loading').classList.add('hidden');
+  initEpisode();
+}
+
+function makeSynth(){
+  const W=40,H=40,obs=[];
+  for(let y=0;y<H;y++){const row=[];for(let x=0;x<W;x++)row.push(!((x%6<=1)||(y%6<=1)));obs.push(row);}
+  return{name:'Synthetic',W,H,cell_size:10,radius:200,obstacles:obs,
+    towers:[[5,5],[34,5],[5,34],[34,34],[20,5],[5,20]],start:[1,1],stats:{free_pct:40,free_cells:640}};
+}
+
+window.addEventListener('resize',()=>{if(GRID){resizeCanvas();drawMap();}});
+load();
+</script>
+</body>
+</html>
