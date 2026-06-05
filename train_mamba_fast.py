@@ -142,6 +142,7 @@ def train(args):
     # Load if exists
     if os.path.exists(args.checkpoint):
         trainer.load(args.checkpoint)
+        print(f"Resuming from step {trainer.train_steps}")
     
     # Metrics
     ep_rewards = deque(maxlen=20)
@@ -154,8 +155,8 @@ def train(args):
     ep_reward = 0.0
     ep_length = 0
     episode = 0
-    total_steps = 0
-    last_save = 0
+    total_steps = trainer.train_steps if os.path.exists(args.checkpoint) else 0
+    last_save = total_steps
     t0 = time.time()
     
     # Logging
