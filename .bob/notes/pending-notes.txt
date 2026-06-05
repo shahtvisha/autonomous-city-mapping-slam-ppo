@@ -22,3 +22,4 @@
 {"id":"76ce2303-6164-41de-aacd-45f72e9a831a","ts":"2026-06-05T15:15:24.861Z","path":"/Users/tvishashah/Documents/active_slam_ppo/agent/mamba_trainer_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
 {"id":"22f047a2-00e7-4630-96d5-f2516e80e708","ts":"2026-06-05T15:15:32.185Z","path":"/Users/tvishashah/Documents/active_slam_ppo/train_mamba_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
 {"id":"e0347f1a-1ba9-4452-88a2-b0e700d347d9","ts":"2026-06-05T15:21:55.008Z","path":"/Users/tvishashah/Documents/active_slam_ppo/train_mamba_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
+{"id":"b6d22148-4a49-4640-801b-ab38d68c809f","ts":"2026-06-05T15:39:36.344Z","path":"/Users/tvishashah/Documents/active_slam_ppo/TRAINING_SAFETY_CHECKLIST.md","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
