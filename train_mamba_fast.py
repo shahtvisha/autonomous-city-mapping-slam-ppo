@@ -32,7 +32,7 @@ def parse_args():
     # Training
     p.add_argument('--steps', type=int, default=300_000)
     p.add_argument('--rollout', type=int, default=2048)
-    p.add_argument('--lr', type=float, default=3e-4)
+    p.add_argument('--lr', type=float, default=1e-4)  # Reduced from 3e-4 for stability
     p.add_argument('--gamma', type=float, default=0.99)
     p.add_argument('--gae', type=float, default=0.95)
     p.add_argument('--clip', type=float, default=0.2)

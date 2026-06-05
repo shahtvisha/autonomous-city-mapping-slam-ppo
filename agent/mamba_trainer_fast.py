@@ -277,14 +277,14 @@ class FastMambaPPOTrainer:
                     self.optimizer.zero_grad()
                     continue
                 
-                # Clip gradients
+                # Clip gradients more aggressively
                 grad_norm = nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad)
                 
-                # Check if gradient norm is too large
-                if grad_norm > self.max_grad * 10:
-                    print(f"WARNING: Very large gradient norm {grad_norm:.2f}, skipping update")
-                    self.optimizer.zero_grad()
-                    continue
+                # Check if gradient norm is too large (reduced threshold)
+                if grad_norm > self.max_grad * 2:  # Changed from 10 to 2
+                    print(f"WARNING: Large gradient norm {grad_norm:.2f}, clipping more aggressively")
+                    # Re-clip with smaller value
+                    nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad * 0.1)
                 
                 self.optimizer.step()
                 
