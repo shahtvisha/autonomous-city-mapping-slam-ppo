@@ -155,12 +155,19 @@ class FastMambaMemorySLAMPolicy(nn.Module):
         self.d_model = d_model
         self.max_seq_len = max_seq_len
         
-        # Observation encoder (smaller)
+        # Observation encoder (smaller) with proper initialization
         self.obs_encoder = nn.Sequential(
             nn.Linear(obs_dim, d_model),
             nn.ReLU(),
             nn.LayerNorm(d_model)
         )
+        
+        # Initialize weights to prevent NaN
+        for module in self.obs_encoder.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.orthogonal_(module.weight, gain=0.01)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
         
         # Fast memory bank
         self.memory_bank = FastNeuralMemoryBank(
@@ -261,12 +268,17 @@ class FastMambaMemorySLAMPolicy(nn.Module):
             torch.cat([current_state, memory_context], dim=-1)
         )
         
-        # Compute outputs
+        # Compute outputs with NaN protection
         logits = self.policy_head(fused_state)
         value = self.value_head(fused_state).squeeze(-1)
         loop_closure_prob = torch.sigmoid(
             self.loop_closure_head(fused_state)
         ).squeeze(-1)
+        
+        # Clamp to prevent NaN/Inf
+        logits = torch.clamp(logits, min=-10, max=10)
+        value = torch.clamp(value, min=-100, max=100)
+        loop_closure_prob = torch.clamp(loop_closure_prob, min=0.01, max=0.99)
         
         # Update memory (less frequently)
         if update_memory and B == 1:

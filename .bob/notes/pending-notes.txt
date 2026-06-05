@@ -15,3 +15,7 @@
 {"id":"3da2383d-a908-4704-a4dd-5099b5ca4ac5","ts":"2026-06-04T22:19:20.367Z","path":"/Users/tvishashah/Documents/active_slam_ppo/evaluate_model.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
 {"id":"85e70e1b-2170-442c-bfdb-5780baad7464","ts":"2026-06-04T22:20:56.222Z","path":"/Users/tvishashah/Documents/active_slam_ppo/create_test_maps.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
 {"id":"16da3878-989f-4254-8427-e232c7ffcad6","ts":"2026-06-04T22:24:15.537Z","path":"/Users/tvishashah/Documents/active_slam_ppo/DEPLOYMENT_GUIDE.md","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
+{"id":"dd9f29de-cde5-4cb4-b86b-ed2df4ddf822","ts":"2026-06-05T14:50:46.873Z","path":"/Users/tvishashah/Documents/active_slam_ppo/agent/mamba_trainer_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
+{"id":"c2d483fd-4fbf-4ddb-b528-9c9c8f6b894e","ts":"2026-06-05T14:59:48.009Z","path":"/Users/tvishashah/Documents/active_slam_ppo/agent/mamba_trainer_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
+{"id":"01c1b9ba-24ea-40cf-96af-b7b1b84d82ac","ts":"2026-06-05T15:02:45.591Z","path":"/Users/tvishashah/Documents/active_slam_ppo/agent/mamba_memory_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}
+{"id":"0fb73509-9e2c-48dc-a013-3f59db8c7e63","ts":"2026-06-05T15:07:47.673Z","path":"/Users/tvishashah/Documents/active_slam_ppo/agent/mamba_memory_fast.py","version":"1.0.0","taskID":"dfbaf170-2270-4dec-903b-1dc917aa0cc8"}

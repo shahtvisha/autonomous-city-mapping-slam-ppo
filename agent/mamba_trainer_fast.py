@@ -117,11 +117,21 @@ class FastMambaPPOTrainer:
     
     @torch.no_grad()
     def act(self, obs: np.ndarray, deterministic: bool = False) -> Tuple:
-        """Select action"""
+        """Select action with NaN detection"""
         obs_t = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
         
         if self.policy_type == 'ultra_fast':
             logits, value = self.net(obs_t, update_buffer=True)
+            
+            # Check for NaN/Inf
+            if torch.isnan(logits).any() or torch.isinf(logits).any():
+                print("WARNING: NaN/Inf detected in logits, using uniform distribution")
+                logits = torch.zeros_like(logits)
+            
+            if torch.isnan(value).any() or torch.isinf(value).any():
+                print("WARNING: NaN/Inf detected in value, using 0.0")
+                value = torch.zeros_like(value)
+            
             dist = Categorical(logits=logits)
             action = logits.argmax(-1) if deterministic else dist.sample()
             log_prob = dist.log_prob(action)
@@ -137,6 +147,19 @@ class FastMambaPPOTrainer:
             logits = outputs['logits']
             value = outputs['value']
             loop_closure_prob = outputs['loop_closure_prob']
+            
+            # Check for NaN/Inf
+            if torch.isnan(logits).any() or torch.isinf(logits).any():
+                print("WARNING: NaN/Inf detected in logits, using uniform distribution")
+                logits = torch.zeros_like(logits)
+            
+            if torch.isnan(value).any() or torch.isinf(value).any():
+                print("WARNING: NaN/Inf detected in value, using 0.0")
+                value = torch.zeros_like(value)
+            
+            if torch.isnan(loop_closure_prob).any() or torch.isinf(loop_closure_prob).any():
+                print("WARNING: NaN/Inf detected in loop_closure_prob, using 0.5")
+                loop_closure_prob = torch.full_like(loop_closure_prob, 0.5)
             
             dist = Categorical(logits=logits)
             action = logits.argmax(-1) if deterministic else dist.sample()
@@ -232,10 +255,37 @@ class FastMambaPPOTrainer:
                        self.vf_coef * value_loss + 
                        self.ent_coef * entropy_loss)
                 
+                # Check for NaN in loss
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print(f"WARNING: NaN/Inf loss detected, skipping update")
+                    continue
+                
                 # Optimize
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad)
+                
+                # Check for NaN gradients
+                has_nan_grad = False
+                for name, param in self.net.named_parameters():
+                    if param.grad is not None:
+                        if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                            print(f"WARNING: NaN/Inf gradient in {name}, skipping update")
+                            has_nan_grad = True
+                            break
+                
+                if has_nan_grad:
+                    self.optimizer.zero_grad()
+                    continue
+                
+                # Clip gradients
+                grad_norm = nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad)
+                
+                # Check if gradient norm is too large
+                if grad_norm > self.max_grad * 10:
+                    print(f"WARNING: Very large gradient norm {grad_norm:.2f}, skipping update")
+                    self.optimizer.zero_grad()
+                    continue
+                
                 self.optimizer.step()
                 
                 total_pl += policy_loss.item()
