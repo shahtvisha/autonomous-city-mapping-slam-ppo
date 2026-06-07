@@ -37,6 +37,7 @@ def parse_args():
     p.add_argument('--gae', type=float, default=0.95)
     p.add_argument('--clip', type=float, default=0.2)
     p.add_argument('--ent-coef', type=float, default=0.01)
+    p.add_argument('--vf-coef',  type=float, default=0.5)
     p.add_argument('--epochs', type=int, default=10)
     p.add_argument('--batch', type=int, default=64)
     
@@ -64,29 +65,45 @@ def parse_args():
     p.add_argument('--target-score', type=float, default=0.90)
     
     # Misc
+    p.add_argument('--seq-len', type=int, default=32,
+                   help='Sequence length for Mamba temporal training')
+
+    # Real-city map training
+    p.add_argument('--city-maps', nargs='+', type=str, default=None,
+                   help='One or more city-map JSON files (from real_city.py). '
+                        'If multiple, a random one is picked each episode.')
+    p.add_argument('--mix-procedural', action='store_true',
+                   help='Mix 50%% procedural maps with the real city maps')
+
     p.add_argument('--render', action='store_true')
     p.add_argument('--eval', action='store_true')
     p.add_argument('--checkpoint', type=str, default=None)
     p.add_argument('--save-freq', type=int, default=25_000)
     p.add_argument('--seed', type=int, default=42)
-    p.add_argument('--city-map', type=str, default=None)
+    p.add_argument('--city-map', type=str, default=None,
+                   help='Single fixed city-map JSON (legacy; use --city-maps for multi-map)')
     
     return p.parse_args()
 
 
-def make_env(args, render=False):
-    """Create environment"""
+def make_env(args, render=False, fixed_city_map=None):
+    """Create environment.
+
+    fixed_city_map: if provided, locks the env to a single map (eval / single-map training).
+                    When using --city-maps for multi-map training, pass None here and
+                    supply city maps per-episode via env.reset(options={'city_map': ...}).
+    """
     import json
-    
-    city_map = None
-    if hasattr(args, 'city_map') and args.city_map:
+
+    city_map = fixed_city_map
+    if city_map is None and hasattr(args, 'city_map') and args.city_map:
         with open(args.city_map) as f:
             city_map = json.load(f)
-    
+
     target_center = None
     if args.target_x is not None and args.target_y is not None:
         target_center = (args.target_x, args.target_y)
-    
+
     env = CityExplorerEnv(
         width=city_map['W'] if city_map else args.width,
         height=city_map['H'] if city_map else args.height,
@@ -105,18 +122,40 @@ def make_env(args, render=False):
     return env
 
 
+def load_city_maps(args):
+    """Load all real-city map JSONs specified by --city-maps."""
+    import json
+    maps = []
+    sources = args.city_maps or []
+    for path in sources:
+        with open(path) as f:
+            maps.append(json.load(f))
+    if maps:
+        print(f"Loaded {len(maps)} real city map(s): "
+              + ", ".join(m.get('name', p) for m, p in zip(maps, sources)))
+    return maps
+
+
 def train(args):
     """Train fast Mamba policy"""
     os.makedirs('checkpoints', exist_ok=True)
     os.makedirs('logs', exist_ok=True)
-    
+
     # Set default d_model based on policy type
     if args.d_model is None:
         args.d_model = 128 if args.policy == 'fast_hybrid' else 64
-    
-    # Create environment
-    env = make_env(args, render=args.render)
-    obs, _ = env.reset()
+
+    # Load real city maps (if any)
+    city_maps = load_city_maps(args)
+    use_multi_map = len(city_maps) > 0
+
+    # Create environment — no fixed map when doing multi-map training
+    env = make_env(args, render=args.render, fixed_city_map=None if use_multi_map else None)
+    if use_multi_map:
+        obs, _ = env.reset(seed=args.seed,
+                           options={'city_map': city_maps[0]})  # first map for first ep
+    else:
+        obs, _ = env.reset(seed=args.seed)  # seed initial reset for reproducibility
     
     # Create trainer
     trainer = FastMambaPPOTrainer(
@@ -131,8 +170,10 @@ def train(args):
         gae_lambda=args.gae,
         clip_eps=args.clip,
         ent_coef=args.ent_coef,
+        vf_coef=args.vf_coef,
         n_epochs=args.epochs,
         batch_size=args.batch,
+        seq_len=args.seq_len,
     )
     
     # Checkpoint path
@@ -142,8 +183,9 @@ def train(args):
     # Load if exists
     if os.path.exists(args.checkpoint):
         trainer.load(args.checkpoint)
-        print(f"Resuming from step {trainer.train_steps}")
-    
+        print(f"Resuming from env step {trainer.total_env_steps} "
+              f"(PPO update {trainer.train_steps})")
+
     # Metrics
     ep_rewards = deque(maxlen=20)
     ep_coverages = deque(maxlen=20)
@@ -151,11 +193,11 @@ def train(args):
     ep_map_accs = deque(maxlen=20)
     ep_lengths = deque(maxlen=20)
     ep_loop_closures = deque(maxlen=20) if args.policy == 'fast_hybrid' else None
-    
+
     ep_reward = 0.0
     ep_length = 0
     episode = 0
-    total_steps = trainer.train_steps if os.path.exists(args.checkpoint) else 0
+    total_steps = trainer.total_env_steps  # correct env-step count, 0 if new run
     last_save = total_steps
     t0 = time.time()
     
@@ -175,7 +217,10 @@ def train(args):
     print(f"  Model: d_model={args.d_model}, layers={args.n_layers}")
     if args.policy == 'fast_hybrid':
         print(f"  Memory: {args.memory_size} landmarks")
-    print(f"  Expected FPS: {'10-30' if args.policy == 'fast_hybrid' else '30-100'}")
+    print(f"  Seq-len: {args.seq_len}  (Mamba temporal training window)")
+    if use_multi_map:
+        print(f"  Maps: {len(city_maps)} real city map(s)"
+              + (" + procedural mix" if args.mix_procedural else ""))
     print(f"  Target: {args.target_coverage*100:.0f}% coverage, "
           f"{args.target_score*100:.0f}% score")
     print(f"{'='*70}\n")
@@ -199,11 +244,19 @@ def train(args):
         # Collect
         trainer.collect(obs, action, log_prob, value, reward, done, loop_closure)
         
-        # Update
-        obs = next_obs if not done else env.reset()[0]
+        # Update — pick a random real map (or procedural) for the next episode
+        if done:
+            if use_multi_map and not (args.mix_procedural and np.random.random() < 0.5):
+                chosen = city_maps[np.random.randint(len(city_maps))]
+                obs = env.reset(options={'city_map': chosen})[0]
+            else:
+                obs = env.reset()[0]
+        else:
+            obs = next_obs
         ep_reward += reward
         ep_length += 1
         total_steps += 1
+        trainer.total_env_steps = total_steps
         
         # Episode end
         if done:

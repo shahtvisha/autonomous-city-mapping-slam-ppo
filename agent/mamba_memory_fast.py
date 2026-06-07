@@ -112,21 +112,21 @@ class FastNeuralMemoryBank(nn.Module):
         top_k_actual = min(top_k, valid_mask.sum().item())
         top_k_sims, top_k_indices = torch.topk(similarities, k=top_k_actual, dim=-1)
         
-        # Retrieve values
-        retrieved = torch.stack([
-            self.memory_values[top_k_indices[i]] for i in range(B)
-        ])
-        
+        # Retrieve values — vectorized fancy index (no Python loop, works for any B)
+        retrieved = self.memory_values[top_k_indices]  # [B, top_k_actual, value_dim]
+
         # Pad if needed
         if top_k_actual < top_k:
             pad_size = top_k - top_k_actual
             retrieved = F.pad(retrieved, (0, 0, 0, pad_size))
             top_k_sims = F.pad(top_k_sims, (0, pad_size), value=0.0)
-        
-        # Update usage (batched)
-        for i in range(B):
-            self.memory_usage[top_k_indices[i]] += 1
-        
+
+        # Update usage (vectorized — handles repeated indices correctly)
+        flat = top_k_indices.reshape(-1)
+        self.memory_usage.index_add_(
+            0, flat, torch.ones(flat.shape[0], device=flat.device)
+        )
+
         return retrieved, top_k_sims
 
 
@@ -203,27 +203,16 @@ class FastMambaMemorySLAMPolicy(nn.Module):
         self.write_counter = 0
         self.write_frequency = 10  # Write every 10 steps (was 5)
         
-        # Cache for last encoding (avoid recomputation)
-        self._last_obs_hash = None
-        self._last_encoding = None
-        
-    def forward(self, obs: torch.Tensor, 
+    def forward(self, obs: torch.Tensor,
                 update_buffer: bool = True,
                 update_memory: bool = True) -> Dict[str, torch.Tensor]:
-        """Optimized forward pass with caching"""
+        """Optimized forward pass"""
         B = obs.shape[0]
-        
-        # Check cache for single observation
-        if B == 1 and update_buffer:
-            obs_hash = hash(obs.data_ptr())
-            if obs_hash == self._last_obs_hash and self._last_encoding is not None:
-                obs_encoded = self._last_encoding
-            else:
-                obs_encoded = self.obs_encoder(obs)
-                self._last_obs_hash = obs_hash
-                self._last_encoding = obs_encoded
-        else:
-            obs_encoded = self.obs_encoder(obs)
+
+        obs_encoded = self.obs_encoder(obs)
+        # Guard: NaN in encoder output causes cascading NaN through Mamba + memory
+        if torch.isnan(obs_encoded).any() or torch.isinf(obs_encoded).any():
+            obs_encoded = torch.nan_to_num(obs_encoded, nan=0.0, posinf=1.0, neginf=-1.0)
         
         # Retrieve from memory (reduced top_k)
         retrieved_memories, similarities = self.memory_bank.read(
@@ -240,7 +229,7 @@ class FastMambaMemorySLAMPolicy(nn.Module):
         if update_buffer and B == 1:
             ptr = int(self.seq_len.item()) % self.max_seq_len
             self.seq_buffer[0, ptr] = obs_encoded[0].detach()
-            self.seq_len = min(self.seq_len + 1, torch.tensor(self.max_seq_len))
+            self.seq_len.add_(1).clamp_(max=self.max_seq_len)
             
             # Use only recent history (truncate if too long)
             seq_len = int(self.seq_len.item())
@@ -261,20 +250,25 @@ class FastMambaMemorySLAMPolicy(nn.Module):
         
         # Process with Mamba (on truncated sequence)
         spatial_context = self.mamba(sequence)
+        # Guard: Mamba SSM can produce NaN with accumulated sequences after checkpoint resume
+        if torch.isnan(spatial_context).any() or torch.isinf(spatial_context).any():
+            spatial_context = torch.nan_to_num(spatial_context, nan=0.0, posinf=1.0, neginf=-1.0)
         current_state = spatial_context[:, -1]
-        
+
         # Fuse (simplified)
         fused_state = self.fusion(
             torch.cat([current_state, memory_context], dim=-1)
         )
-        
+        if torch.isnan(fused_state).any() or torch.isinf(fused_state).any():
+            fused_state = torch.nan_to_num(fused_state, nan=0.0, posinf=1.0, neginf=-1.0)
+
         # Compute outputs with NaN protection
         logits = self.policy_head(fused_state)
         value = self.value_head(fused_state).squeeze(-1)
         loop_closure_prob = torch.sigmoid(
             self.loop_closure_head(fused_state)
         ).squeeze(-1)
-        
+
         # Clamp to prevent NaN/Inf
         logits = torch.clamp(logits, min=-10, max=10)
         value = torch.clamp(value, min=-100, max=100)
@@ -285,7 +279,8 @@ class FastMambaMemorySLAMPolicy(nn.Module):
             self.write_counter += 1
             if self.write_counter >= self.write_frequency:
                 key = obs_encoded[:, :64]  # Use first 64 dims
-                self.memory_bank.write(key, obs_encoded)
+                if not (torch.isnan(key).any() or torch.isnan(obs_encoded).any()):
+                    self.memory_bank.write(key, obs_encoded)
                 self.write_counter = 0
         
         return {
@@ -296,6 +291,53 @@ class FastMambaMemorySLAMPolicy(nn.Module):
             'memory_context': memory_context
         }
     
+    def forward_sequence(self, obs_seq: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Sequence-aware forward pass used during PPO training.
+        Gradients flow through the full T-step Mamba scan.
+
+        obs_seq: [B, T, obs_dim]
+        Returns logits/value/loop_closure_prob all shaped [B*T, ...]
+        """
+        B, T, _ = obs_seq.shape
+        BT = B * T
+
+        # Encode every timestep in one batched call
+        obs_flat = obs_seq.reshape(BT, self.obs_dim)
+        encoded_flat = self.obs_encoder(obs_flat)           # [BT, d_model]
+        encoded_seq  = encoded_flat.reshape(B, T, self.d_model)
+
+        # Memory retrieval — vectorized over all BT queries at once
+        retrieved, similarities = self.memory_bank.read(encoded_flat, top_k=5)
+        # retrieved: [BT, 5, d_model]   similarities: [BT, 5]
+        memory_ctx = torch.sum(
+            retrieved * similarities.unsqueeze(-1), dim=1
+        )  # [BT, d_model]
+        memory_ctx_seq = memory_ctx.reshape(B, T, self.d_model)
+
+        # Full Mamba scan over T steps — this is where temporal gradients flow
+        spatial_context = self.mamba(encoded_seq)  # [B, T, d_model]
+
+        # Fuse at every timestep
+        fused = self.fusion(
+            torch.cat([
+                spatial_context.reshape(BT, self.d_model),
+                memory_ctx_seq.reshape(BT, self.d_model)
+            ], dim=-1)
+        )  # [BT, d_model]
+
+        logits = torch.clamp(self.policy_head(fused), min=-10, max=10)
+        value  = torch.clamp(self.value_head(fused).squeeze(-1), min=-100, max=100)
+        loop_closure_prob = torch.clamp(
+            torch.sigmoid(self.loop_closure_head(fused)).squeeze(-1), min=0.01, max=0.99
+        )
+
+        return {
+            'logits':            logits,            # [BT, n_actions]
+            'value':             value,             # [BT]
+            'loop_closure_prob': loop_closure_prob, # [BT]
+        }
+
     def reset_sequence(self):
         """Reset sequence buffer"""
         self.seq_buffer.zero_()
@@ -359,7 +401,7 @@ class UltraFastMambaSLAMPolicy(nn.Module):
         if update_buffer and B == 1:
             ptr = int(self.seq_len.item()) % self.max_seq_len
             self.seq_buffer[0, ptr] = obs_encoded[0].detach()
-            self.seq_len = min(self.seq_len + 1, torch.tensor(self.max_seq_len))
+            self.seq_len.add_(1).clamp_(max=self.max_seq_len)
             
             seq_len = min(int(self.seq_len.item()), 30)  # Use only last 30
             if seq_len < self.max_seq_len:
@@ -381,6 +423,21 @@ class UltraFastMambaSLAMPolicy(nn.Module):
         
         return logits, value
     
+    def forward_sequence(self, obs_seq: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Sequence-aware forward pass used during PPO training.
+        obs_seq: [B, T, obs_dim]
+        Returns: logits [B*T, n_actions], value [B*T]
+        """
+        B, T, _ = obs_seq.shape
+        BT = B * T
+        obs_flat     = obs_seq.reshape(BT, self.obs_dim)
+        encoded_flat = F.relu(self.obs_encoder(obs_flat))           # [BT, d_model]
+        encoded_seq  = encoded_flat.reshape(B, T, self.d_model)
+        spatial      = self.mamba(encoded_seq)                      # [B, T, d_model]
+        fused        = spatial.reshape(BT, self.d_model)
+        return self.policy_head(fused), self.value_head(fused).squeeze(-1)
+
     def reset_sequence(self):
         """Reset"""
         self.seq_buffer.zero_()

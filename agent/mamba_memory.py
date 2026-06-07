@@ -424,7 +424,7 @@ class MambaSLAMPolicy(nn.Module):
             # Add to sequence buffer
             ptr = int(self.seq_len.item()) % self.max_seq_len
             self.seq_buffer[0, ptr] = obs_encoded[0].detach()
-            self.seq_len = min(self.seq_len + 1, torch.tensor(self.max_seq_len))
+            self.seq_len.add_(1).clamp_(max=self.max_seq_len)
             
             # Get current sequence
             seq_len = int(self.seq_len.item())
@@ -561,7 +561,7 @@ class MambaMemorySLAMPolicy(nn.Module):
         if update_buffer and B == 1:
             ptr = int(self.seq_len.item()) % self.max_seq_len
             self.seq_buffer[0, ptr] = obs_encoded[0].detach()
-            self.seq_len = min(self.seq_len + 1, torch.tensor(self.max_seq_len))
+            self.seq_len.add_(1).clamp_(max=self.max_seq_len)
             
             seq_len = int(self.seq_len.item())
             if seq_len < self.max_seq_len:

@@ -96,24 +96,34 @@ class CityExplorerEnv(gym.Env):
         self._prev_region_coverage = 0.0
         self._prev_region_score = 0.0
         self._prev_entropy = 1.0
+        self._prev_target_dist = np.inf
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        if self._city_map:
-            W = self._city_map['W']
-            H = self._city_map['H']
-            obs_flat = [item for row in self._city_map['obstacles'] for item in row]
+        # Per-episode map override: options['city_map'] > self._city_map > procedural
+        active_map = (options or {}).get('city_map', self._city_map)
+        # Temporarily set so _choose_target / _choose_start see the right map dict
+        self._city_map = active_map
+
+        if active_map:
+            W = active_map['W']
+            H = active_map['H']
+            obs_flat = [item for row in active_map['obstacles'] for item in row]
             obstacles = np.array(obs_flat, dtype=bool).reshape(H, W)
             self.W = W
             self.H = H
             self.slam = OccupancyGrid(SLAMConfig(width=W, height=H, fov_range=self.fov))
             self.city = type('City', (), {
                 'obstacles': obstacles,
-                'towers': [tuple(t) for t in self._city_map.get('towers', [])]
+                'towers': [tuple(t) for t in active_map.get('towers', [])]
             })()
         else:
-            s = seed if seed is not None else self._seed
+            if seed is not None:
+                s = seed
+            else:
+                # Advance the env's RNG each reset so every episode gets a distinct map
+                s = int(self.np_random.integers(0, 2**31))
             self.city = CityMap(self.W, self.H, self.n_towers, seed=s)
             self.slam.reset()
 
@@ -133,6 +143,7 @@ class CityExplorerEnv(gym.Env):
         self._prev_region_coverage = metrics['region_coverage']
         self._prev_region_score = metrics['region_score']
         self._prev_entropy = self.slam.entropy
+        self._prev_target_dist = float(np.linalg.norm(self.pos - self._target))
         return self._get_obs(), {}
 
     def step(self, action):
@@ -209,17 +220,34 @@ class CityExplorerEnv(gym.Env):
         reward += 120.0 * score_gain
         reward += 5.0 * max(entropy_gain, 0.0)
 
+        # In-region bonus: dense reward for being inside target area.
+        # The Euclidean approach reward creates local minima with obstacles, so instead
+        # we reward presence inside the region and let frontier-biasing handle navigation.
+        target_dist = float(np.linalg.norm(self.pos - self._target))
+        in_region = self._region_mask[cy, cx]
+        if in_region:
+            reward += 1.0  # +1/step for being inside the target region
+        self._prev_target_dist = target_dist
+
         if self.slam.visit_count[cy, cx] == 1:
             reward += 0.2
 
         frontiers = self.slam.get_frontiers()
         if frontiers:
-            nearest = min(np.hypot(fx-cx, fy-cy) for fx,fy in frontiers)
+            # Prefer frontiers near the target region, not just nearest to agent
+            tx, ty = self._target
+            scored = [
+                (0.4 * np.hypot(fx-cx, fy-cy) + 0.6 * np.hypot(fx-tx, fy-ty), fx, fy)
+                for fx, fy in frontiers
+            ]
+            scored.sort()
+            _, bfx, bfy = scored[0]
+            nearest_biased = np.hypot(bfx-cx, bfy-cy)
             if self._prev_frontier_dist < np.inf:
-                progress = self._prev_frontier_dist - nearest
+                progress = self._prev_frontier_dist - nearest_biased
                 if progress > 0:
                     reward += progress * 0.2
-            self._prev_frontier_dist = nearest
+            self._prev_frontier_dist = nearest_biased
         else:
             reward += 10.0
 
@@ -230,7 +258,7 @@ class CityExplorerEnv(gym.Env):
                 reward += 5.0
             key = ('region_score', t)
             if region_score >= t and key not in self._cov_milestones:
-                self._cov_milestones.add(t)
+                self._cov_milestones.add(key)
                 reward += 8.0
 
         if region_cov >= self.target_coverage and region_score >= self.target_score:
@@ -276,6 +304,20 @@ class CityExplorerEnv(gym.Env):
             sx, sy = self._city_map['start']
             if 0 <= sx < self.W and 0 <= sy < self.H and not self.city.obstacles[sy, sx]:
                 return np.array([sx, sy], dtype=np.int32)
+
+        # Curriculum: 50% of episodes start near the target region so the agent
+        # learns to map it well; 50% start randomly to learn navigation to it.
+        if self.np_random.random() < 0.5:
+            tx, ty = self._target
+            r = self._target_radius()
+            for _ in range(60):
+                angle = self.np_random.uniform(0, 2 * np.pi)
+                dist = self.np_random.uniform(0, r * 2.0)
+                sx = int(np.clip(tx + dist * np.cos(angle), 0, self.W - 1))
+                sy = int(np.clip(ty + dist * np.sin(angle), 0, self.H - 1))
+                if not self.city.obstacles[sy, sx]:
+                    return np.array([sx, sy], dtype=np.int32)
+
         return self._random_free_pos()
 
     def _target_radius(self):

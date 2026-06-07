@@ -151,10 +151,10 @@ def run_episode(env, trainer, policy_type, save_trajectory=False):
     while not done:
         # Act
         if policy_type == 'ultra_fast':
-            action, _, _ = trainer.act(obs, deterministic=True)
+            action, _, _ = trainer.act(obs, deterministic=False)
             loop_closure = None
         else:
-            action, _, _, loop_closure = trainer.act(obs, deterministic=True)
+            action, _, _, loop_closure = trainer.act(obs, deterministic=False)
             if loop_closure > 0.85:  # Loop closure threshold
                 episode_data['loop_closures'].append(episode_data['steps'])
         

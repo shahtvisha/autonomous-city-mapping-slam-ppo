@@ -44,6 +44,7 @@ class FastMambaPPOTrainer:
                  max_grad: float = 0.5,
                  n_epochs: int = 10,
                  batch_size: int = 64,
+                 seq_len: int = 32,
                  device: str = 'auto'):
         
         if device == 'auto':
@@ -85,6 +86,7 @@ class FastMambaPPOTrainer:
         self.max_grad = max_grad
         self.n_epochs = n_epochs
         self.batch_size = batch_size
+        self.seq_len = seq_len
         
         # Rollout buffer
         self._obs: List = []
@@ -99,6 +101,7 @@ class FastMambaPPOTrainer:
             self._loop_closures: List = []
         
         self.train_steps = 0
+        self.total_env_steps = 0
         self.losses: Dict = {}
     
     def collect(self, obs: np.ndarray, action: int, log_prob: float,
@@ -147,16 +150,16 @@ class FastMambaPPOTrainer:
             logits = outputs['logits']
             value = outputs['value']
             loop_closure_prob = outputs['loop_closure_prob']
-            
+
             # Check for NaN/Inf
             if torch.isnan(logits).any() or torch.isinf(logits).any():
                 print("WARNING: NaN/Inf detected in logits, using uniform distribution")
                 logits = torch.zeros_like(logits)
-            
+
             if torch.isnan(value).any() or torch.isinf(value).any():
                 print("WARNING: NaN/Inf detected in value, using 0.0")
                 value = torch.zeros_like(value)
-            
+
             if torch.isnan(loop_closure_prob).any() or torch.isinf(loop_closure_prob).any():
                 print("WARNING: NaN/Inf detected in loop_closure_prob, using 0.5")
                 loop_closure_prob = torch.full_like(loop_closure_prob, 0.5)
@@ -177,138 +180,146 @@ class FastMambaPPOTrainer:
         self.net.reset_sequence()
     
     def train(self, last_obs: np.ndarray, last_done: bool) -> Dict:
-        """PPO update"""
-        if len(self._obs) < self.batch_size:
+        """PPO update with sequence-aware mini-batches for Mamba temporal learning."""
+        N = len(self._obs)
+        if N < self.seq_len * 2:
             return {}
-        
+
         # Bootstrap value
         with torch.no_grad():
             obs_t = torch.FloatTensor(last_obs).unsqueeze(0).to(self.device)
             if self.policy_type == 'ultra_fast':
                 _, last_val = self.net(obs_t, update_buffer=False)
             else:
-                outputs = self.net(obs_t, update_buffer=False, update_memory=False)
-                last_val = outputs['value']
+                out = self.net(obs_t, update_buffer=False, update_memory=False)
+                last_val = out['value']
             last_val = float(last_val.item()) * (1.0 - float(last_done))
-        
-        # Compute advantages
+
         advantages = self._compute_gae(last_val)
-        returns = advantages + np.array(self._values, dtype=np.float32)
-        
-        # Convert to tensors
-        obs_t = torch.FloatTensor(np.array(self._obs)).to(self.device)
-        act_t = torch.LongTensor(self._actions).to(self.device)
-        lp_t = torch.FloatTensor(self._log_probs).to(self.device)
-        adv_t = torch.FloatTensor(advantages).to(self.device)
-        ret_t = torch.FloatTensor(returns).to(self.device)
-        val_t = torch.FloatTensor(self._values).to(self.device)
-        
-        # Normalize advantages
-        adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)
-        
-        N = len(self._obs)
+        returns    = advantages + np.array(self._values, dtype=np.float32)
+
+        # Flat numpy arrays for indexing
+        obs_arr = np.array(self._obs,       dtype=np.float32)   # [N, obs_dim]
+        act_arr = np.array(self._actions,   dtype=np.int64)
+        lp_arr  = np.array(self._log_probs, dtype=np.float32)
+        val_arr = np.array(self._values,    dtype=np.float32)
+        adv_arr = advantages.astype(np.float32)
+        ret_arr = returns.astype(np.float32)
+
+        # Normalize advantages over the full rollout
+        adv_arr = (adv_arr - adv_arr.mean()) / (adv_arr.std() + 1e-8)
+
+        # Fixed-length non-overlapping sequence chunks
+        T         = self.seq_len
+        n_seqs    = N // T          # discard the tail (< T steps)
+        seq_starts = np.arange(n_seqs) * T   # [n_seqs]
+
+        if n_seqs == 0:
+            self._clear_buffer()
+            return {}
+
+        # Number of sequences per mini-batch (keeps token count ≈ batch_size)
+        seqs_per_batch = max(1, self.batch_size // T)
+
         total_pl = total_vl = total_el = 0.0
         n_updates = 0
-        
-        # PPO epochs
+
         for _ in range(self.n_epochs):
-            idxs = np.random.permutation(N)
-            
-            for start in range(0, N, self.batch_size):
-                b = idxs[start:start + self.batch_size]
-                
-                # Forward pass
-                if self.policy_type == 'ultra_fast':
-                    logits, value = self.net(obs_t[b], update_buffer=False)
-                    dist = Categorical(logits=logits)
-                    log_prob = dist.log_prob(act_t[b])
-                    entropy = dist.entropy()
-                else:
-                    outputs = self.net(obs_t[b], update_buffer=False, update_memory=False)
-                    logits = outputs['logits']
-                    value = outputs['value']
-                    dist = Categorical(logits=logits)
-                    log_prob = dist.log_prob(act_t[b])
-                    entropy = dist.entropy()
-                
-                # Policy loss
-                ratio = torch.exp(log_prob - lp_t[b])
-                adv_b = adv_t[b]
-                
-                pl1 = -ratio * adv_b
-                pl2 = -torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * adv_b
-                policy_loss = torch.max(pl1, pl2).mean()
-                
-                # Value loss
-                v_clipped = val_t[b] + torch.clamp(
-                    value - val_t[b], -self.clip_eps, self.clip_eps
-                )
-                vl1 = F.mse_loss(value, ret_t[b])
-                vl2 = F.mse_loss(v_clipped, ret_t[b])
-                value_loss = torch.max(vl1, vl2)
-                
-                # Entropy loss
-                entropy_loss = -entropy.mean()
-                
-                # Total loss
-                loss = (policy_loss + 
-                       self.vf_coef * value_loss + 
-                       self.ent_coef * entropy_loss)
-                
-                # Check for NaN in loss
-                if torch.isnan(loss) or torch.isinf(loss):
-                    print(f"WARNING: NaN/Inf loss detected, skipping update")
+            perm = np.random.permutation(n_seqs)
+
+            for chunk in range(0, n_seqs, seqs_per_batch):
+                idxs = perm[chunk:chunk + seqs_per_batch]
+                if len(idxs) == 0:
                     continue
-                
-                # Optimize
+
+                B  = len(idxs)
+                BT = B * T
+                s  = seq_starts[idxs]   # start indices for chosen sequences
+
+                # Build [B, T, ...] sequence batches (vectorized slicing)
+                obs_seq = np.stack([obs_arr[si:si+T] for si in s])  # [B, T, obs_dim]
+                act_bt  = np.concatenate([act_arr[si:si+T] for si in s])  # [BT]
+                lp_bt   = np.concatenate([lp_arr[si:si+T]  for si in s])
+                adv_bt  = np.concatenate([adv_arr[si:si+T] for si in s])
+                ret_bt  = np.concatenate([ret_arr[si:si+T] for si in s])
+                val_bt  = np.concatenate([val_arr[si:si+T] for si in s])
+
+                obs_t = torch.FloatTensor(obs_seq).to(self.device)  # [B, T, obs_dim]
+                act_t = torch.LongTensor(act_bt).to(self.device)
+                lp_t  = torch.FloatTensor(lp_bt).to(self.device)
+                adv_t = torch.FloatTensor(adv_bt).to(self.device)
+                ret_t = torch.FloatTensor(ret_bt).to(self.device)
+                val_t = torch.FloatTensor(val_bt).to(self.device)
+
+                # Sequence forward — gradients flow through all T Mamba steps
+                if self.policy_type == 'ultra_fast':
+                    logits, value = self.net.forward_sequence(obs_t)  # [BT, ...], [BT]
+                else:
+                    out    = self.net.forward_sequence(obs_t)
+                    logits = out['logits']   # [BT, n_actions]
+                    value  = out['value']    # [BT]
+
+                if torch.isnan(logits).any() or torch.isinf(logits).any():
+                    continue
+                if torch.isnan(value).any() or torch.isinf(value).any():
+                    continue
+
+                dist      = Categorical(logits=logits)
+                log_prob  = dist.log_prob(act_t)
+                entropy   = dist.entropy()
+
+                ratio = torch.exp(log_prob - lp_t)
+                pl1   = -ratio * adv_t
+                pl2   = -torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * adv_t
+                policy_loss = torch.max(pl1, pl2).mean()
+
+                v_clipped  = val_t + torch.clamp(value - val_t, -self.clip_eps, self.clip_eps)
+                value_loss = torch.max(F.mse_loss(value, ret_t),
+                                       F.mse_loss(v_clipped, ret_t))
+
+                entropy_loss = -entropy.mean()
+                loss = policy_loss + self.vf_coef * value_loss + self.ent_coef * entropy_loss
+
+                if torch.isnan(loss) or torch.isinf(loss):
+                    continue
+
                 self.optimizer.zero_grad()
                 loss.backward()
-                
-                # Check for NaN gradients
-                has_nan_grad = False
-                for name, param in self.net.named_parameters():
-                    if param.grad is not None:
-                        if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                            print(f"WARNING: NaN/Inf gradient in {name}, skipping update")
-                            has_nan_grad = True
-                            break
-                
+
+                has_nan_grad = any(
+                    p.grad is not None and
+                    (torch.isnan(p.grad).any() or torch.isinf(p.grad).any())
+                    for p in self.net.parameters()
+                )
                 if has_nan_grad:
                     self.optimizer.zero_grad()
                     continue
-                
-                # Clip gradients more aggressively
-                grad_norm = nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad)
-                
-                # Check if gradient norm is too large (reduced threshold)
-                if grad_norm > self.max_grad * 2:  # Changed from 10 to 2
-                    print(f"WARNING: Large gradient norm {grad_norm:.2f}, clipping more aggressively")
-                    # Re-clip with smaller value
-                    nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad * 0.1)
-                
+
+                nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad)
                 self.optimizer.step()
-                
+
                 total_pl += policy_loss.item()
                 total_vl += value_loss.item()
-                total_el += (-entropy_loss.item())
+                total_el += -entropy_loss.item()
                 n_updates += 1
-        
+
         self.scheduler.step()
         self.train_steps += 1
-        
-        # Compute metrics
+
+        if n_updates == 0:
+            self._clear_buffer()
+            return {}
+
         self.losses = {
             'policy_loss': round(total_pl / n_updates, 4),
-            'value_loss': round(total_vl / n_updates, 4),
-            'entropy': round(total_el / n_updates, 4),
-            'lr': round(self.scheduler.get_last_lr()[0], 6),
+            'value_loss':  round(total_vl / n_updates, 4),
+            'entropy':     round(total_el / n_updates, 4),
+            'lr':          round(self.scheduler.get_last_lr()[0], 6),
         }
-        
+
         if self.policy_type == 'fast_hybrid' and self._loop_closures:
-            self.losses['mean_loop_closure'] = round(
-                np.mean(self._loop_closures), 4
-            )
-        
+            self.losses['mean_loop_closure'] = round(np.mean(self._loop_closures), 4)
+
         self._clear_buffer()
         return self.losses
     
@@ -349,6 +360,7 @@ class FastMambaPPOTrainer:
             'net_state': self.net.state_dict(),
             'optimizer_state': self.optimizer.state_dict(),
             'train_steps': self.train_steps,
+            'total_env_steps': self.total_env_steps,
             'policy_type': self.policy_type,
         }
         
@@ -372,6 +384,7 @@ class FastMambaPPOTrainer:
         self.net.load_state_dict(checkpoint['net_state'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state'])
         self.train_steps = checkpoint.get('train_steps', 0)
+        self.total_env_steps = checkpoint.get('total_env_steps', 0)
         
         if self.policy_type == 'fast_hybrid' and 'memory_bank' in checkpoint:
             mb = checkpoint['memory_bank']
