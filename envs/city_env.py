@@ -97,6 +97,11 @@ class CityExplorerEnv(gym.Env):
         self._prev_region_score = 0.0
         self._prev_entropy = 1.0
         self._prev_target_dist = np.inf
+        self._entered_region = False
+        self._prev_action = -1
+
+    # Reversal pairs for momentum penalty (index → opposite index)
+    _REVERSAL = {0:1, 1:0, 2:3, 3:2, 4:7, 7:4, 5:6, 6:5}
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -144,6 +149,8 @@ class CityExplorerEnv(gym.Env):
         self._prev_region_score = metrics['region_score']
         self._prev_entropy = self.slam.entropy
         self._prev_target_dist = float(np.linalg.norm(self.pos - self._target))
+        self._entered_region = False
+        self._prev_action = -1
         return self._get_obs(), {}
 
     def step(self, action):
@@ -156,7 +163,8 @@ class CityExplorerEnv(gym.Env):
         self._update_slam()
         self._step += 1
         self._cells_visited.add(tuple(self.pos))
-        reward, info = self._compute_reward(collision)
+        reward, info = self._compute_reward(collision, action)
+        self._prev_action = int(action)
         terminated = self._is_success(info)
         truncated = self._step >= self.max_steps
         return self._get_obs(), reward, terminated, truncated, info
@@ -204,7 +212,7 @@ class CityExplorerEnv(gym.Env):
 
         return np.concatenate([local, glb, meta])
 
-    def _compute_reward(self, collision):
+    def _compute_reward(self, collision, action=-1):
         reward = 0.0
         cx, cy = self.pos
         metrics = self._region_metrics()
@@ -220,14 +228,18 @@ class CityExplorerEnv(gym.Env):
         reward += 120.0 * score_gain
         reward += 5.0 * max(entropy_gain, 0.0)
 
-        # In-region bonus: dense reward for being inside target area.
-        # The Euclidean approach reward creates local minima with obstacles, so instead
-        # we reward presence inside the region and let frontier-biasing handle navigation.
         target_dist = float(np.linalg.norm(self.pos - self._target))
         in_region = self._region_mask[cy, cx]
         if in_region:
             reward += 1.0  # +1/step for being inside the target region
+            if not self._entered_region:
+                reward += 30.0  # one-time bonus for finding the region
+                self._entered_region = True
         self._prev_target_dist = target_dist
+
+        # Momentum: penalise 180° reversals to encourage car-like movement
+        if self._prev_action >= 0 and self._REVERSAL.get(self._prev_action) == action:
+            reward -= 0.3
 
         if self.slam.visit_count[cy, cx] == 1:
             reward += 0.2
@@ -305,9 +317,9 @@ class CityExplorerEnv(gym.Env):
             if 0 <= sx < self.W and 0 <= sy < self.H and not self.city.obstacles[sy, sx]:
                 return np.array([sx, sy], dtype=np.int32)
 
-        # Curriculum: 50% of episodes start near the target region so the agent
-        # learns to map it well; 50% start randomly to learn navigation to it.
-        if self.np_random.random() < 0.5:
+        # Curriculum: 70% of episodes start near the target region so the agent
+        # gets dense positive signal; 30% start randomly to retain navigation.
+        if self.np_random.random() < 0.7:
             tx, ty = self._target
             r = self._target_radius()
             for _ in range(60):
