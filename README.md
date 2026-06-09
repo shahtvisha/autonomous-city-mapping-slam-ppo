@@ -1,6 +1,6 @@
 # Active SLAM + PPO — Autonomous City Mapping
 
-An autonomous agent that maps an unknown urban environment from scratch using only local LiDAR observations — no GPS, no prior map.
+An autonomous agent that maps an unknown urban environment from scratch using only local LiDAR observations (no GPS, no prior map)
 
 **Live demo → [huggingface.co/spaces/TvishaShah/active-slam](https://huggingface.co/spaces/TvishaShah/active-slam)**
 
