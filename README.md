@@ -5,7 +5,7 @@ An autonomous agent that maps an unknown urban environment from scratch using on
 **Live demo → [huggingface.co/spaces/TvishaShah/active-slam](https://huggingface.co/spaces/TvishaShah/active-slam)**
 
 ![Agent run](https://huggingface.co/spaces/TvishaShah/active-slam/resolve/main/assets/run_centre.gif)
-*Left: SLAM belief map built from sensor data alone. Right: ground truth + agent trajectory. Kendall Square, Boston using OpenStreetMap data.*
+Left: SLAM belief map built from sensor data alone. Right: ground truth + agent trajectory. Kendall Square, Boston using OpenStreetMap data.
 
 
 
@@ -15,7 +15,6 @@ An autonomous agent that maps an unknown urban environment from scratch using on
 |---|---|
 | Peak region coverage | **89.7%** (977 steps) |
 | Average map accuracy | **91.0%** across 10 episodes |
-| Episodes with >70% coverage | 4 / 10 |
 | Map size | 60×60 grid · 10 m/cell |
 | Trained on | Boston, NYC, Chicago, Paris (real OSM) |
 
