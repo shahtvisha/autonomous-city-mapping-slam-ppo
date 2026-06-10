@@ -1,20 +1,23 @@
-# Active SLAM + PPO - Autonomous City Mapping
+# Autonomous City Mapping with Multi-Agent Active SLAM
 
-An autonomous agent that maps an unknown urban environment from scratch using only local LiDAR observations (no GPS, no prior map)
+Three RL agents with Mamba state-space memory collaboratively build a real-time city map from raw sensor data alone, achieving 90%+ coverage on real-world street grids.
 
 **Live demo → [huggingface.co/spaces/TvishaShah/active-slam](https://huggingface.co/spaces/TvishaShah/active-slam)**
 
 ![Agent run](https://huggingface.co/spaces/TvishaShah/active-slam/resolve/main/assets/run_centre.gif)
-Left: SLAM belief map built from sensor data alone. Right: ground truth + agent trajectory. Kendall Square, Boston using OpenStreetMap data.
+Left: shared SLAM belief map built from sensor data alone. Right: ground truth + agent trajectories. Kendall Square, Boston using OpenStreetMap data.
 
+Built a reinforcement learning system where three agents collaboratively map an unknown city using only onboard sensors. Each agent runs a Mamba state-space model (SSM) policy trained with Proximal Policy Optimization (PPO), maintaining a persistent spatial memory of its trajectory. The agents share a single Bayesian occupancy grid updated in real time via 360° LiDAR ray-casting, so every agent's observations immediately benefit the team.
 
+The exploration strategy uses a zone-based lawnmower planner: the city is divided into three sectors and each agent systematically walks a waypoint grid through its sector, then switches to BFS-directed coverage to mop up remaining unexplored cells. Agent placement is restricted to the largest connected component of the road network to prevent agents from spawning in unreachable pockets.
 
 ## Results
 
 | Metric | Value |
 |---|---|
-| Peak region coverage | **89.7%** (977 steps) |
+| Peak region coverage | **90.9%** |
 | Average map accuracy | **91.0%** across 10 episodes |
+| Agents | 3 (shared SLAM, independent Mamba states) |
 | Map size | 60×60 grid · 10 m/cell |
 | Trained on | Boston, NYC, Chicago, Paris (real OSM) |
 
@@ -55,13 +58,16 @@ FastMambaPPOTrainer      — PPO with 32-step sequence chunks
 
 ```
 envs/city_env.py            — CityExplorerEnv (Gymnasium), procedural + OSM map support
+envs/multi_agent_env.py     — MultiAgentCityExplorerEnv — 3 agents, shared SLAM
 slam/occupancy_grid.py      — Bayesian occupancy grid, Bresenham LiDAR, frontier detection
+agent/mamba_memory.py       — MambaBlock, MambaSpatialEncoder, NeuralMemoryBank
 agent/mamba_memory_fast.py  — FastMambaMemorySLAMPolicy, FastNeuralMemoryBank
 agent/mamba_trainer_fast.py — FastMambaPPOTrainer (PPO + Mamba + sequence chunking)
 train_mamba_fast.py         — Main training script
 real_city.py                — OSM → occupancy grid pipeline
 evaluate_model.py           — Batch evaluation across episodes
-visualize_agent.py          — Real-time SLAM visualization + GIF export
+visualize_agent.py          — Single-agent SLAM visualization + GIF export
+visualize_multi_agent.py    — 3-agent cooperative visualization + GIF export
 deploy.py                   — Run agent on a real map with GPS target
 hf_space/                   — Gradio demo (deployed to Hugging Face)
 ```
@@ -100,8 +106,11 @@ python evaluate_model.py --checkpoint checkpoints/mamba_fast_hybrid_slam.pt --ep
 # Watch the agent navigate and save a GIF
 python deploy.py --map data/real_grid.json --lat 42.3601 --lon -71.0942
 
-# Interactive visualization
+# Single-agent visualization
 python visualize_agent.py --city-map data/real_grid.json --save-gif
+
+# 3-agent cooperative visualization (searches for best seed, runs full episode)
+python visualize_multi_agent.py --city-map data/real_grid.json --search 15 --full-run --save-gif
 ```
 
 ---
