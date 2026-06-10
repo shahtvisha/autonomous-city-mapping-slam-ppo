@@ -2,8 +2,6 @@
 
 Three RL agents with Mamba state-space memory collaboratively build a real-time city map from raw sensor data alone, achieving 90%+ coverage on real-world street grids.
 
-**Live demo → [huggingface.co/spaces/TvishaShah/active-slam](https://huggingface.co/spaces/TvishaShah/active-slam)**
-
 ![Agent run](https://huggingface.co/spaces/TvishaShah/active-slam/resolve/main/assets/run_centre.gif)
 Left: shared SLAM belief map built from sensor data alone. Right: ground truth + agent trajectories. Kendall Square, Boston using OpenStreetMap data.
 
