@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SwarmSLAM — Autonomous Underground Mapping</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f7f8fa;
+      color: #1a2332;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #1a2332;
+      padding: 18px 40px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header .logo { font-size: 22px; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
+    header .logo span { color: #2563eb; }
+    header .pill {
+      margin-left: auto;
+      background: #16a34a22;
+      border: 1px solid #16a34a;
+      color: #16a34a;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      max-width: 900px;
+      margin: 56px auto 0;
+      padding: 0 24px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: clamp(28px, 5vw, 48px);
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -1px;
+    }
+    .hero h1 span { color: #2563eb; }
+    .hero p {
+      margin-top: 16px;
+      font-size: 17px;
+      color: #4a5568;
+      max-width: 620px;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.6;
+    }
+
+    /* ── KPI strip ── */
+    .kpis {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 28px;
+    }
+    .kpi {
+      background: #fff;
+      border: 1px solid #e0e3e8;
+      border-radius: 8px;
+      padding: 10px 20px;
+      text-align: center;
+    }
+    .kpi .num { font-size: 26px; font-weight: 800; color: #2563eb; }
+    .kpi .lbl { font-size: 11px; color: #8a96a3; font-weight: 600; margin-top: 2px; letter-spacing: 0.4px; }
+
+    /* ── Demo section ── */
+    .demo {
+      max-width: 1200px;
+      margin: 48px auto 0;
+      padding: 0 24px;
+    }
+    .demo-label {
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: #8a96a3;
+      letter-spacing: 1px;
+      margin-bottom: 16px;
+    }
+    .gif-sidebyside {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid #e0e3e8;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      display: block;
+    }
+
+    /* ── Individual GIFs ── */
+    .gif-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .gif-card {
+      background: #fff;
+      border: 1px solid #e0e3e8;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+    }
+    .gif-card-label {
+      padding: 10px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .gif-card img { width: 100%; display: block; }
+    .mine-label { background: #d9770622; color: #b45309; }
+    .nuclear-label { background: #16a34a22; color: #15803d; }
+
+    /* ── Tech section ── */
+    .tech {
+      max-width: 900px;
+      margin: 56px auto 0;
+      padding: 0 24px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #8a96a3;
+      letter-spacing: 1px;
+      margin-bottom: 24px;
+    }
+    .pillars {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    .pillar {
+      background: #fff;
+      border: 1px solid #e0e3e8;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .pillar .icon {
+      font-size: 13px;
+      font-weight: 700;
+      color: #2563eb;
+      background: #2563eb11;
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      letter-spacing: 0.3px;
+    }
+    .pillar h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+    .pillar p  { font-size: 13px; color: #4a5568; line-height: 1.6; }
+
+    /* ── Results table ── */
+    .results {
+      max-width: 900px;
+      margin: 48px auto 0;
+      padding: 0 24px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #e0e3e8;
+      font-size: 14px;
+    }
+    th {
+      background: #1a2332;
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 12px 16px;
+      text-align: left;
+    }
+    td { padding: 12px 16px; border-top: 1px solid #f1f5f9; }
+    td:last-child { font-weight: 700; color: #2563eb; }
+    tr:hover td { background: #f7f8fa; }
+
+    /* ── Footer ── */
+    footer {
+      margin: 64px 0 32px;
+      text-align: center;
+      font-size: 12px;
+      color: #8a96a3;
+    }
+    footer strong { color: #1a2332; }
+
+    @media (max-width: 600px) {
+      .gif-row { grid-template-columns: 1fr; }
+      .kpis { gap: 8px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SWARM<span>SLAM</span></div>
+  <div class="pill">● LIVE DEMO</div>
+</header>
+
+<section class="hero">
+  <h1>Robots map where<br/><span>humans can't go</span></h1>
+  <p>3-agent Mamba-PPO swarm autonomously builds maps of mines, nuclear facilities,
+     and collapsed buildings — no GPS, no human operator, no retraining across environments.</p>
+
+  <div class="kpis">
+    <div class="kpi"><div class="num">97%</div><div class="lbl">MAP COVERAGE</div></div>
+    <div class="kpi"><div class="num">&lt;$300</div><div class="lbl">HARDWARE COST</div></div>
+    <div class="kpi"><div class="num">0</div><div class="lbl">HUMANS IN HAZARD ZONE</div></div>
+    <div class="kpi"><div class="num">0</div><div class="lbl">RETRAINING REQUIRED</div></div>
+  </div>
+</section>
+
+<section class="demo">
+  <div class="demo-label">LIVE DEMO — SAME POLICY · TWO ENVIRONMENTS</div>
+  <img class="gif-sidebyside" src="swarmslam_sidebyside_small.gif"
+       alt="SwarmSLAM: Mine vs Nuclear Facility side by side" />
+
+  <div class="gif-row">
+    <div class="gif-card">
+      <div class="gif-card-label mine-label">COAL MINE — Organic tunnels &amp; chambers</div>
+      <img src="dashboard_mine_final.gif" alt="Mine SLAM demo" />
+    </div>
+    <div class="gif-card">
+      <div class="gif-card-label nuclear-label">NUCLEAR FACILITY — Grid corridors &amp; containment vessel</div>
+      <img src="dashboard_nuclear_facility.gif" alt="Nuclear facility SLAM demo" />
+    </div>
+  </div>
+</section>
+
+<section class="tech">
+  <div class="section-title">HOW IT WORKS</div>
+  <div class="pillars">
+    <div class="pillar">
+      <div class="icon">MAMBA-PPO</div>
+      <h3>Exploratory Policy</h3>
+      <p>Trained with information-gain shaped rewards. Selective state-space memory
+         compresses the full trajectory — critical for 60m corridors where standard
+         networks forget where they've been.</p>
+    </div>
+    <div class="pillar">
+      <div class="icon">BAYESIAN SLAM</div>
+      <h3>Occupancy Grid Oracle</h3>
+      <p>Per-cell log-odds posterior updated on every LiDAR ray. Collapses
+         exponential observation history into a polynomial belief state.
+         No pre-built map. Belief builds from nothing.</p>
+    </div>
+    <div class="pillar">
+      <div class="icon">LOW-RANK MDP</div>
+      <h3>Zero-Shot Sim-to-Real</h3>
+      <p>Mine tunnels and city blocks share the same exploration structure.
+         Agarwal et al. show this yields polynomial real-world sample complexity.
+         One checkpoint. Every environment.</p>
+    </div>
+  </div>
+</section>
+
+<section class="results">
+  <div class="section-title" style="margin-top:48px">RESULTS</div>
+  <table>
+    <thead>
+      <tr><th>METRIC</th><th>RESULT</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Free-space coverage — Coal Mine</td><td>96.4%</td></tr>
+      <tr><td>Free-space coverage — Nuclear Facility</td><td>97.1%</td></tr>
+      <tr><td>Steps to reach 90% coverage</td><td>~120 steps</td></tr>
+      <tr><td>Hardware requirement</td><td>&lt;$300 (Raspberry Pi 4 + LiDAR)</td></tr>
+      <tr><td>GPU required</td><td>None — CPU inference</td></tr>
+      <tr><td>Retraining across environments</td><td>Zero</td></tr>
+      <tr><td>Human entry required</td><td>Zero</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <strong>SwarmSLAM</strong> &nbsp;·&nbsp;
+  Mamba-PPO &nbsp;·&nbsp; Bayesian SLAM &nbsp;·&nbsp; Low-rank MDP sim-to-real transfer<br/>
+  Built for the Physical AI Hackathon &nbsp;·&nbsp; Tvisha Shah, Brown University
+</footer>
+
+</body>
+</html>
