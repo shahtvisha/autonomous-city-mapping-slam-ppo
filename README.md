@@ -9,6 +9,8 @@ Built a reinforcement learning system where three agents collaboratively map an 
 
 The exploration strategy uses a zone-based lawnmower planner: the city is divided into three sectors and each agent systematically walks a waypoint grid through its sector, then switches to BFS-directed coverage to mop up remaining unexplored cells. Agent placement is restricted to the largest connected component of the road network to prevent agents from spawning in unreachable pockets.
 
+Some additional exploration in places beyond cities -> mines and nuclear facilities: https://shahtvisha.github.io/autonomous-city-mapping-slam-ppo/
+
 ## Results
 
 | Metric | Value |
